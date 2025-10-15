@@ -1,0 +1,37 @@
+{
+  "name": "ASP.NET Dev Container",
+  "dockerFile": "Dockerfile",
+  "context": "..",
+  "runArgs": ["--init"],
+  "forwardPorts": [5001, 5001],
+  "postCreateCommand": "dotnet restore",
+  "remoteUser": "vscode",
+
+  // ✅ Enables full debugging support
+  "customizations": {
+    "vscode": {
+      "settings": {
+        "dotnet.defaultSolution": "PgClient/PgClient.csproj",
+        "terminal.integrated.shell.linux": "/bin/bash",
+        "omnisharp.useModernNet": true
+      },
+      "extensions": [
+        "ms-dotnettools.csharp",
+        "ms-vscode.vscode-node-azure-pack",
+        "ms-azuretools.vscode-docker"
+      ]
+    }
+  },
+
+  // Mount local files for live editing
+  "mounts": [
+    "source=${localWorkspaceFolder},target=/workspace,type=bind,consistency=cached"
+  ],
+
+  // Automatically start debugging server
+  "portsAttributes": {
+    "5000": { "label": "HTTP" },
+    "5001": { "label": "HTTPS" }
+  }
+}
+
