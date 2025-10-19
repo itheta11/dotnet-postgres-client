@@ -5,7 +5,7 @@ public class ConnectionParameters
 
     public required string Database { get; set; }
 
-    public required string User { get; set; }
+    public required string Username { get; set; }
 
     public string Password { get; set; }
 

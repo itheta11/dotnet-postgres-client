@@ -3,7 +3,7 @@ using System.Text;
 
 namespace PgClient;
 
-public sealed class BufferReader
+public class BufferReader: IDisposable
 {
     private byte[] _buffer;
     private int _offset;
@@ -11,6 +11,7 @@ public sealed class BufferReader
     public int Remaining => _buffer.Length - _offset;
     public int Position => _offset;
     public int Length => _buffer.Length;
+    private bool _disposed;
 
     public BufferReader()
     {
@@ -123,5 +124,29 @@ public sealed class BufferReader
     /// Resets reading position to start.
     /// </summary>
     public void Reset() => _offset = 0;
+
+    public void Dispose()
+    {
+        Dispose(true);
+        GC.SuppressFinalize(this);
+    }
+    protected virtual void Dispose(bool disposing)
+    {
+        if (!_disposed)
+        {
+            if (disposing)
+            {
+                _buffer = null!;
+                _offset = 0;
+            }
+            _disposed = true;
+        }
+
+    }
+
+    ~BufferReader()
+    {
+        Dispose(false);
+    }
 
 }

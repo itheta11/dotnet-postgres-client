@@ -219,6 +219,7 @@ public class TestWorkingClient
             // Client-first-message
             string clientFirstMessageBare = $"n={username},r={nonce}";
             string clientFirstMessage = "n,," + clientFirstMessageBare;
+            /// Example n,,n=postgres,r=fyko+d2lbbFgONRv9qkxdawL
 
             byte[] clientFirstBytes = Encoding.UTF8.GetBytes(clientFirstMessage);
             byte[] mechanismBytes = Encoding.UTF8.GetBytes("SCRAM-SHA-256\0");
@@ -233,48 +234,48 @@ public class TestWorkingClient
             writer.Write(clientFirstBytes);
             stream.Write(ms.ToArray(), 0, (int)ms.Length);
 
-            // Read server-first-message
-            //     char type = (char)stream.ReadByte();
-            //     int length = ReadInt32BE(stream);
-            //     byte[] payload = new byte[length];
-            //     stream.Read(payload, 0, length);
-            //     string serverFirst = Encoding.UTF8.GetString(payload);
+            ///Read server-first-message
+                char type = (char)stream.ReadByte();
+                int length = ReadInt32BE(stream);
+                byte[] payload = new byte[length];
+                stream.Read(payload, 0, length);
+                string serverFirst = Encoding.UTF8.GetString(payload);
 
-            //     // Parse server nonce, salt, iterations
-            //     var parts = serverFirst.Split(',');
-            //     string serverNonce = parts[0].Substring(2);
-            //     string salt = parts[1].Substring(2);
-            //     int iterations = int.Parse(parts[2].Substring(2));
+                // Parse server nonce, salt, iterations
+                var parts = serverFirst.Split(',');
+                string serverNonce = parts[0].Substring(2);
+                string salt = parts[1].Substring(2);
+                int iterations = int.Parse(parts[2].Substring(2));
 
-            //     // Client-final-message
-            //     string channelBinding = "c=biws";
-            //     string nonceFinal = $"r={serverNonce}";
-            //     string authMessage = clientFirstMessageBare + "," + serverFirst + "," + channelBinding + "," + nonceFinal;
+                // Client-final-message
+                string channelBinding = "c=biws";
+                string nonceFinal = $"r={serverNonce}";
+                string authMessage = clientFirstMessageBare + "," + serverFirst + "," + channelBinding + "," + nonceFinal;
 
-            //     byte[] saltedPassword = PBKDF2SHA256(password, Convert.FromBase64String(salt), iterations);
-            //     byte[] clientKey = HMACSHA256(saltedPassword, "Client Key");
-            //     byte[] storedKey = SHA256Hash(clientKey);
-            //     byte[] clientSignature = HMACSHA256(storedKey, authMessage);
-            //     byte[] clientProofBytes = XOR(clientKey, clientSignature);
-            //     string clientProof = Convert.ToBase64String(clientProofBytes);
+                byte[] saltedPassword = PBKDF2SHA256(password, Convert.FromBase64String(salt), iterations);
+                byte[] clientKey = HMACSHA256(saltedPassword, "Client Key");
+                byte[] storedKey = SHA256Hash(clientKey);
+                byte[] clientSignature = HMACSHA256(storedKey, authMessage);
+                byte[] clientProofBytes = XOR(clientKey, clientSignature);
+                string clientProof = Convert.ToBase64String(clientProofBytes);
 
-            //     string clientFinalMessage = $"{channelBinding},{nonceFinal},p={clientProof}";
+                string clientFinalMessage = $"{channelBinding},{nonceFinal},p={clientProof}";
 
-            //     // Send client-final-message
-            //     byte[] finalBytes = Encoding.UTF8.GetBytes(clientFinalMessage);
-            //     using var ms2 = new MemoryStream();
-            //     using var writer2 = new BinaryWriter(ms2);
-            //     writer2.Write((byte)'p');
-            //     WriteInt32BE(writer2, finalBytes.Length + 4 + 1);
-            //     writer2.Write(finalBytes);
-            //     stream.Write(ms2.ToArray(), 0, (int)ms2.Length);
+                // Send client-final-message
+                byte[] finalBytes = Encoding.UTF8.GetBytes(clientFinalMessage);
+                using var ms2 = new MemoryStream();
+                using var writer2 = new BinaryWriter(ms2);
+                writer2.Write((byte)'p');
+                WriteInt32BE(writer2, finalBytes.Length + 4 + 1);
+                writer2.Write(finalBytes);
+                stream.Write(ms2.ToArray(), 0, (int)ms2.Length);
 
-            //     // Server-final-message
-            //     type = (char)stream.ReadByte();
-            //     length = ReadInt32BE(stream) - 4;
-            //     SkipBytes(stream, length);
+                // Server-final-message
+                type = (char)stream.ReadByte();
+                length = ReadInt32BE(stream) - 4;
+                SkipBytes(stream, length);
 
-            //     Console.WriteLine("✅ SCRAM-SHA-256 authentication complete.");
+                Console.WriteLine("✅ SCRAM-SHA-256 authentication complete.");
             return nonce;
         }
 

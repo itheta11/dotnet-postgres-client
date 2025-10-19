@@ -1,3 +1,5 @@
+using PgClient.Protocol;
+
 namespace PgClient;
 
 public class Serializer
@@ -9,7 +11,7 @@ public class Serializer
     public byte[] StartUpBytes(Dictionary<string, string> options)
     {
         using var Writer = new BufferWriter();
-        Writer.WriteInt16(3); ///protocol version 3
+        Writer.WriteInt16(Convert.ToInt16(PostgresProtocol.ProtocolVersion)); ///protocol version 3
         Writer.WriteInt16(0); ///empty byte
 
         foreach (var option in options)
@@ -28,5 +30,10 @@ public class Serializer
         finalWriter.WriteInt32(totalLength);
         finalWriter.WriteBytes(contentBytes);
         return finalWriter.WrittenBytes;
+    }
+
+    public void SendSASLIntial(string mechanism, string initialResponse )
+    {
+        using var Writer = new BufferWriter();
     }
 }

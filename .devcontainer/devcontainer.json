@@ -16,9 +16,8 @@
         "omnisharp.useModernNet": true
       },
       "extensions": [
-        "ms-dotnettools.csharp",
-        "ms-vscode.vscode-node-azure-pack",
-        "ms-azuretools.vscode-docker"
+        "vscodevim.vim",
+        "ms-dotnettools.csdevkit"
       ]
     }
   },
