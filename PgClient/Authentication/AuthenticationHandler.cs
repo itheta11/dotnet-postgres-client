@@ -49,11 +49,15 @@ public class AuthenticationHandler
                 SendSASLIntial(stream, mechanism, _connectionParams);
                 break;
             case PostgresProtocol.AuthenticationCode.SASLContinue:
-                string serverFirstMessage = Encoding.UTF8.GetString(payload);
+                string serverFirstMessage = Encoding.UTF8.GetString(payload)
+                        .Replace("\0", string.Empty)
+                        .Replace("\v", string.Empty);
                 AuthSASLContinue(stream, serverFirstMessage);
                 break;
             case PostgresProtocol.AuthenticationCode.SASLFinal:
-                string serverFinal = Encoding.UTF8.GetString(payload);
+                string serverFinal = Encoding.UTF8.GetString(payload)
+                        .Replace("\0", string.Empty)
+                        .Replace("\v", string.Empty);
                 ValidateServerFinal(serverFinal, _saltedPassword, _authMessage);
                 break;
 
@@ -75,7 +79,8 @@ public class AuthenticationHandler
         string nonce = CreateClientNonce();
 
         // client-first-message
-        string clientFirstMessageBare = $"n={connectionParams.Username},r={nonce}";
+        string clientFirstMessageBare = $"n=*,r={nonce}";
+        //string clientFirstMessageBare = $"n=*,r={nonce}";
         _clientFirstMessagebare = clientFirstMessageBare;
         string clientFirstMessage = $"n,,{clientFirstMessageBare}";
         /// Example n,,n=postgres,r=fyko+d2lbbFgONRv9qkxdawL
@@ -95,15 +100,6 @@ public class AuthenticationHandler
         ms.Position = 1;
         writer.Write(Helper.ToBigEndian(totalLength));
         stream.Write(ms.ToArray(), 0, ms.ToArray().Length);
-
-        // using BufferWriter writer = new BufferWriter();
-        // writer.WriteByte((byte)PostgresProtocol.FrontendMessageCode.PasswordMessage);
-        // writer.WriteInt32(totalLength);
-        // writer.WriteString(clientFirstMessage);
-
-        // stream.Write(writer.WrittenBytes, 0, writer.Length);
-
-
     }
 
     /// <summary>
@@ -162,9 +158,6 @@ public class AuthenticationHandler
         string serverNonce = null;
         string saltB64 = null;
         int iterations = 0;
-        int indexOfr = firstServerMessage.IndexOf("r=");
-        firstServerMessage = firstServerMessage.Substring(indexOfr);
-
         var parts = firstServerMessage.Split(',');
         foreach (var p in parts)
         {
@@ -172,17 +165,20 @@ public class AuthenticationHandler
             {
                 int index = p.IndexOf("r=");
                 serverNonce = p.Substring(index + 2);
+                //serverNonce = "/J6vYp8OMZMcH+aAe8c0PaEkM+LJh9c16Tm8cfhoMROnId1s";
                 _serverNonce = serverNonce;
             }
             else if (p.StartsWith("s="))
             {
                 int index = p.IndexOf("s=");
                 saltB64 = p.Substring(index + 2);
+                //saltB64 = "hmg0S4alnHPaCBMJDTR5mA==";
             }
             else if (p.StartsWith("i="))
             {
                 int index = p.IndexOf("i=");
                 iterations = int.Parse(p.Substring(index + 2));
+                //iterations = 4096;
             }
         }
 
@@ -193,6 +189,7 @@ public class AuthenticationHandler
         string clientFinalWithoutProof = $"c=biws,r={serverNonce}";
 
         string authMessage = $"{_clientFirstMessagebare},{firstServerMessage},{clientFinalWithoutProof}";
+        //string authMessage = "n=*,r=/J6vYp8OMZMcH+aAe8c0PaEk,r=/J6vYp8OMZMcH+aAe8c0PaEkM+LJh9c16Tm8cfhoMROnId1s,s=hmg0S4alnHPaCBMJDTR5mA==,i=4096,c=biws,r=/J6vYp8OMZMcH+aAe8c0PaEkM+LJh9c16Tm8cfhoMROnId1s";
         Console.WriteLine($"auth message - {authMessage}");
         byte[] salt = Convert.FromBase64String(saltB64);
         byte[] saltedPasswordBytes = PBKDF2SHA256(_connectionParams.Password, salt, iterations);
@@ -217,9 +214,9 @@ public class AuthenticationHandler
     /// <returns></returns>
     private void SendServerSaslResponse(NetworkStream stream, string authMessage, byte[] saltedPasswordBytes)
     {
-        byte[] clientKey = HmacSha256(saltedPasswordBytes, Encoding.UTF8.GetBytes("Client Key"));
+        byte[] clientKey = HmacSha256(saltedPasswordBytes, "Client Key");
         byte[] storedKey = ShaHash256(clientKey);
-        byte[] clientSignature = HmacSha256(storedKey, Encoding.UTF8.GetBytes(authMessage));
+        byte[] clientSignature = HmacSha256(storedKey, authMessage);
         byte[] clientProof = Xor(clientKey, clientSignature);
         string clientProofB64 = Convert.ToBase64String(clientProof);
 
@@ -228,19 +225,24 @@ public class AuthenticationHandler
         // extract the final part from authMessage: authMessage = clientFirstBare + "," + serverFirst + "," + clientFinalWithoutProof
         string clientFinalWithoutProof = authMessage.Substring(authMessage.LastIndexOf(',') + 1); // last segment
         string clientFinalMessage = $"c=biws,r={_serverNonce},p={clientProofB64}";
+        ///c=biws,r=/J6vYp8OMZMcH+aAe8c0PaEkM+LJh9c16Tm8cfhoMROnId1s,p=+9JcUS6n9iVWjPrqI6bpXHtdptjXlRGg/Nv1RgJhC4k=
         Console.WriteLine($"Client final message - {clientFinalMessage}");
         byte[] finalBytes = Encoding.UTF8.GetBytes(clientFinalMessage);
-
+        int totalLength = finalBytes.Length + 4;
         using var ms = new MemoryStream();
         using var writer = new BinaryWriter(ms);
         writer.Write((byte)PostgresProtocol.FrontendMessageCode.PasswordMessage);
-        writer.Write(new byte[4]); ///placeholder for length;
+
+        long lengthPosition = ms.Position;
+        writer.Write(0); //placeholder for length
         writer.Write(finalBytes);
 
-        int length = (int)finalBytes.Length - 1;
-        ms.Position = 1;
+        long endPosition = ms.Position;
+        int length = (int)(endPosition - 1);
+        ms.Position = lengthPosition;
         writer.Write(Helper.ToBigEndian(length));
 
+        ms.Position = 0;
         stream.Write(ms.ToArray(), 0, ms.ToArray().Length);
     }
 
@@ -276,8 +278,8 @@ public class AuthenticationHandler
         }
 
         // serverKey = HMAC(saltedPassword, "Server Key")
-        byte[] serverKey = HmacSha256(saltedPassword, Encoding.UTF8.GetBytes("Server Key"));
-        byte[] serverSignature = HmacSha256(serverKey, Encoding.UTF8.GetBytes(authMessage));
+        byte[] serverKey = HmacSha256(saltedPassword, "Server Key");
+        byte[] serverSignature = HmacSha256(serverKey, authMessage);
         string expected = Convert.ToBase64String(serverSignature);
         if (!CryptographicOperations.FixedTimeEquals(Convert.FromBase64String(vPart), serverSignature))
             throw new Exception($"SCRAM server signature mismatch. expected={expected} got={vPart}");
@@ -290,22 +292,21 @@ public class AuthenticationHandler
         {
             rng.GetBytes(nonceBytes);
         }
-        string nonce = Convert.ToBase64String(nonceBytes).Replace("=", "").Replace("+", "").Replace("/", "");
+        string nonce = Convert.ToBase64String(nonceBytes);
         _clientNonce = nonce;
         return nonce;
     }
 
     private byte[] PBKDF2SHA256(string password, byte[] salt, int iterations)
     {
-        byte[] passwordBytes = Encoding.UTF8.GetBytes(password);
-        using var pbkdf2 = new Rfc2898DeriveBytes(passwordBytes, salt, iterations, HashAlgorithmName.SHA256);
+        using var pbkdf2 = new Rfc2898DeriveBytes(password, salt, iterations, HashAlgorithmName.SHA256);
         return pbkdf2.GetBytes(32);
     }
 
-    private byte[]  HmacSha256(byte[] key, byte[] data)
+    private byte[] HmacSha256(byte[] key, string message)
     {
         using var h = new HMACSHA256(key);
-        return h.ComputeHash(data);
+        return h.ComputeHash(Encoding.UTF8.GetBytes(message));
     }
 
     private byte[] ShaHash256(byte[] data)
@@ -317,7 +318,10 @@ public class AuthenticationHandler
     private byte[] Xor(byte[] a, byte[] b)
     {
         var r = new byte[a.Length];
-        for (int i = 0; i < a.Length; i++) r[i] = (byte)(a[i] ^ b[i]);
+        for (int i = 0; i < a.Length; i++)
+        {
+            r[i] = (byte)(a[i] ^ b[i]);
+        }
         return r;
     }
 
@@ -350,7 +354,7 @@ public class AuthenticationHandler
             target[i] ^= source[i];
         }
     }
-    
+
     private string SaslPrep(string input)
     {
         // Simplified SASLprep - for production, use proper normalization

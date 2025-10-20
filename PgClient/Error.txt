@@ -3,3 +3,6 @@
    at PgClient.BufferUtils.BufferStreamReader.ReadMessage() in /workspaces/postgres-client/PgClient/BufferUtils/BufferStreamReader.cs:line 25
    at PgClient.MessageController.MessageController.HandleMessages(NetworkStream stream) in /workspaces/postgres-client/PgClient/MessageController/MessageController.cs:line 23
    at PgConnection.ConnectAsync() in /workspaces/postgres-client/PgClient/PgConnection.cs:line 49
+
+
+   "server error SFATAL\0VFATAL\0C08P01\0Mmalformed SCRAM message\0DMalformed proof in client-final-message.\0Fauth-scram.c\0L1390\0Rread_client_final_message\0\0"

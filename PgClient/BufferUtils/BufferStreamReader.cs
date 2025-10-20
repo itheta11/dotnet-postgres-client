@@ -1,4 +1,5 @@
 using System.Buffers;
+using System.Text;
 
 namespace PgClient.BufferUtils;
 
@@ -40,7 +41,7 @@ public class BufferStreamReader : IAsyncDisposable, IDisposable
         // Copy into exact-sized array before returning
         var result = new byte[payloadLength];
         Buffer.BlockCopy(_payloadBuffer, 0, result, 0, payloadLength);
-
+        var c = Encoding.UTF8.GetString(result);
         return (code, length, result);
     }
 

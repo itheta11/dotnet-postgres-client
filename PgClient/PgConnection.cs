@@ -41,7 +41,6 @@ public class PgConnection : IAsyncDisposable, IDisposable
             {
                 {"user", _connectionParams.Username },
                 {"database", _connectionParams.Database},
-                {"application_name", _connectionParams.ApplicationName},
             };
             SendStartupMessage(connectionDict);
             MessageController messageController = new MessageController(_connectionParams);
@@ -79,25 +78,24 @@ public class PgConnection : IAsyncDisposable, IDisposable
         using var ms = new MemoryStream();
         using var writer = new BinaryWriter(ms, Encoding.UTF8);
 
+        writer.Write(new byte[4]); //placeholder length
         writer.Write(Helper.ToBigEndian(196608)); /// protocol 3.0 (0x00030000)
         foreach (var option in options)
         {
             Helper.WriteCString(writer, option.Key);
             Helper.WriteCString(writer, option.Value);
         }
-
+        Helper.WriteCString(writer, "client_encoding");
+        Helper.WriteCString(writer, "UTF8");
         writer.Write((byte)0);  /// terminator 
 
-        byte[] payload = ms.ToArray();
-        int length = payload.Length + 4;
+        int len = (int)ms.Length;
+        ms.Position = 0;
+        writer.Write(Helper.ToBigEndian(len));
 
-        using var final = new MemoryStream();
-        using var finalWriter = new BinaryWriter(final);
-        finalWriter.Write(Helper.ToBigEndian(length));
-        finalWriter.Write(payload);
-
-        byte[] msg = final.ToArray();
-        _networkStream?.Write(msg, 0, msg.Length);
+        byte[] bytes = ms.ToArray();
+        var check = Encoding.UTF8.GetString(bytes);
+        _networkStream?.Write(bytes, 0, bytes.Length);
     }
 
     #region Disposing resources
