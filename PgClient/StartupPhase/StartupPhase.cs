@@ -1,12 +1,9 @@
 using PgClient.Protocol;
 
-namespace PgClient;
+namespace PgClient.StartupPhase;
 
-public class Serializer
+public class StartupPhase
 {
-    private BufferWriter Writer;
-
-
     public byte[] StartUpBytes(Dictionary<string, string> options)
     {
         using var Writer = new BufferWriter();
@@ -29,10 +26,5 @@ public class Serializer
         finalWriter.WriteInt32(totalLength);
         finalWriter.WriteBytes(contentBytes);
         return finalWriter.WrittenBytes;
-    }
-
-    public void SendSASLIntial(string mechanism, string initialResponse )
-    {
-        using var Writer = new BufferWriter();
     }
 }

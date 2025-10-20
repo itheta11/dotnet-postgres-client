@@ -1,4 +1,5 @@
 using System;
+using System.Buffers.Binary;
 using System.Net.Sockets;
 
 namespace PgClient;
@@ -44,4 +45,11 @@ public static class Helper
     public static int ToBigEndian(int value)
         => ((value & 0xFF) << 24) | ((value & 0xFF00) << 8)
          | ((value >> 8) & 0xFF00) | ((value >> 24) & 0xFF);
+
+    public static void WriteInt32BE(BinaryWriter w, int value)
+    {
+        Span<byte> span = stackalloc byte[4];
+        BinaryPrimitives.WriteInt32BigEndian(span, value);
+        w.Write(span.ToArray());
+    }
 }

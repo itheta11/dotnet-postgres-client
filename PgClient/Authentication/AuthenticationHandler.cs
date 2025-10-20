@@ -12,7 +12,8 @@ public class AuthenticationHandler
     private string _mechanisms = "SCRAM-SHA-256";
 
     private string _clientFirstMessagebare = "";
-    private string _nonce = "";
+    private string _clientNonce = "";
+    private string _serverNonce = "";
     private byte[] _saltedPassword;
     private string _authMessage = "";
     public AuthenticationHandler(ConnectionParameters connectionParameters)
@@ -80,14 +81,27 @@ public class AuthenticationHandler
         /// Example n,,n=postgres,r=fyko+d2lbbFgONRv9qkxdawL
 
         byte[] clientFirstMessageBytes = Encoding.UTF8.GetBytes(clientFirstMessage);
-        int totalLength = 4 + clientFirstMessageBytes.Length;
         //byte[] mechanismBytes = Encoding.UTF8.GetBytes($"{mechanism}\0");
-        using BufferWriter writer = new BufferWriter();
-        writer.WriteByte((byte)PostgresProtocol.FrontendMessageCode.PasswordMessage);
-        writer.WriteInt32(totalLength);
-        writer.WriteString(clientFirstMessage);
 
-        stream.Write(writer.WrittenBytes, 0, writer.Length);
+        using var ms = new MemoryStream();
+        using var writer = new BinaryWriter(ms, Encoding.UTF8, leaveOpen: true);
+        writer.Write((byte)PostgresProtocol.FrontendMessageCode.PasswordMessage);
+        writer.Write(new byte[4]); /// placeholder for length
+        Helper.WriteCString(writer, mechanism);
+        writer.Write(Helper.ToBigEndian(clientFirstMessageBytes.Length));
+        writer.Write(clientFirstMessageBytes);
+
+        int totalLength = (int)ms.Length - 1;
+        ms.Position = 1;
+        writer.Write(Helper.ToBigEndian(totalLength));
+        stream.Write(ms.ToArray(), 0, ms.ToArray().Length);
+
+        // using BufferWriter writer = new BufferWriter();
+        // writer.WriteByte((byte)PostgresProtocol.FrontendMessageCode.PasswordMessage);
+        // writer.WriteInt32(totalLength);
+        // writer.WriteString(clientFirstMessage);
+
+        // stream.Write(writer.WrittenBytes, 0, writer.Length);
 
 
     }
@@ -148,13 +162,28 @@ public class AuthenticationHandler
         string serverNonce = null;
         string saltB64 = null;
         int iterations = 0;
+        int indexOfr = firstServerMessage.IndexOf("r=");
+        firstServerMessage = firstServerMessage.Substring(indexOfr);
 
         var parts = firstServerMessage.Split(',');
         foreach (var p in parts)
         {
-            if (p.StartsWith("r=")) serverNonce = p.Substring(2);
-            else if (p.StartsWith("s=")) saltB64 = p.Substring(2);
-            else if (p.StartsWith("i=")) iterations = int.Parse(p.Substring(2));
+            if (p.Contains("r="))
+            {
+                int index = p.IndexOf("r=");
+                serverNonce = p.Substring(index + 2);
+                _serverNonce = serverNonce;
+            }
+            else if (p.StartsWith("s="))
+            {
+                int index = p.IndexOf("s=");
+                saltB64 = p.Substring(index + 2);
+            }
+            else if (p.StartsWith("i="))
+            {
+                int index = p.IndexOf("i=");
+                iterations = int.Parse(p.Substring(index + 2));
+            }
         }
 
         if (serverNonce == null || saltB64 == null || iterations == 0)
@@ -163,12 +192,12 @@ public class AuthenticationHandler
         // clientFinalWithoutProof = "c=biws,r=<serverNonce>"
         string clientFinalWithoutProof = $"c=biws,r={serverNonce}";
 
-        string authMessage = _clientFirstMessagebare + "," +
-                firstServerMessage + "," +
-                clientFinalWithoutProof;
-
+        string authMessage = $"{_clientFirstMessagebare},{firstServerMessage},{clientFinalWithoutProof}";
+        Console.WriteLine($"auth message - {authMessage}");
         byte[] salt = Convert.FromBase64String(saltB64);
         byte[] saltedPasswordBytes = PBKDF2SHA256(_connectionParams.Password, salt, iterations);
+        //byte[] saltedPasswordBytes = Hi(Encoding.UTF8.GetBytes(SaslPrep(_connectionParams.Password)), salt, iterations);
+
         return (authMessage, saltedPasswordBytes);
     }
 
@@ -198,15 +227,21 @@ public class AuthenticationHandler
         // clientFinalWithoutProof; it is "c=biws,r=<serverNonce>" — but authMessage contains it as last part;
         // extract the final part from authMessage: authMessage = clientFirstBare + "," + serverFirst + "," + clientFinalWithoutProof
         string clientFinalWithoutProof = authMessage.Substring(authMessage.LastIndexOf(',') + 1); // last segment
-        string clientFinalMessage = clientFinalWithoutProof + ",p=" + clientProofB64;
+        string clientFinalMessage = $"c=biws,r={_serverNonce},p={clientProofB64}";
+        Console.WriteLine($"Client final message - {clientFinalMessage}");
         byte[] finalBytes = Encoding.UTF8.GetBytes(clientFinalMessage);
 
-        using BufferWriter writer = new BufferWriter();
-        writer.WriteByte((byte)PostgresProtocol.FrontendMessageCode.PasswordMessage);
-        writer.WriteInt32(4 + finalBytes.Length);
-        writer.WriteBytes(finalBytes);
+        using var ms = new MemoryStream();
+        using var writer = new BinaryWriter(ms);
+        writer.Write((byte)PostgresProtocol.FrontendMessageCode.PasswordMessage);
+        writer.Write(new byte[4]); ///placeholder for length;
+        writer.Write(finalBytes);
 
-        stream.Write(writer.WrittenBytes.ToArray(), 0, writer.Length);
+        int length = (int)finalBytes.Length - 1;
+        ms.Position = 1;
+        writer.Write(Helper.ToBigEndian(length));
+
+        stream.Write(ms.ToArray(), 0, ms.ToArray().Length);
     }
 
 
@@ -250,20 +285,24 @@ public class AuthenticationHandler
 
     private string CreateClientNonce()
     {
-        byte[] nonceBytes = new byte[18];
-        RandomNumberGenerator.Fill(nonceBytes);
-        string nonce = Convert.ToBase64String(nonceBytes);
-        _nonce = nonce;
+        byte[] nonceBytes = new byte[18]; // 18 bytes = 24 base64 chars
+        using (var rng = RandomNumberGenerator.Create())
+        {
+            rng.GetBytes(nonceBytes);
+        }
+        string nonce = Convert.ToBase64String(nonceBytes).Replace("=", "").Replace("+", "").Replace("/", "");
+        _clientNonce = nonce;
         return nonce;
     }
 
     private byte[] PBKDF2SHA256(string password, byte[] salt, int iterations)
     {
-        using var pbkdf2 = new Rfc2898DeriveBytes(password, salt, iterations, HashAlgorithmName.SHA256);
+        byte[] passwordBytes = Encoding.UTF8.GetBytes(password);
+        using var pbkdf2 = new Rfc2898DeriveBytes(passwordBytes, salt, iterations, HashAlgorithmName.SHA256);
         return pbkdf2.GetBytes(32);
     }
 
-    private byte[] HmacSha256(byte[] key, byte[] data)
+    private byte[]  HmacSha256(byte[] key, byte[] data)
     {
         using var h = new HMACSHA256(key);
         return h.ComputeHash(data);
@@ -280,5 +319,42 @@ public class AuthenticationHandler
         var r = new byte[a.Length];
         for (int i = 0; i < a.Length; i++) r[i] = (byte)(a[i] ^ b[i]);
         return r;
+    }
+
+    private byte[] Hi(byte[] password, byte[] salt, int iterations)
+    {
+        using (var hmac = new HMACSHA256(password))
+        {
+            // PBKDF2 with HMAC-SHA-256
+            byte[] saltWithIndex = new byte[salt.Length + 4];
+            Buffer.BlockCopy(salt, 0, saltWithIndex, 0, salt.Length);
+            saltWithIndex[salt.Length + 3] = 1; // INT(1) in big-endian
+
+            byte[] u = hmac.ComputeHash(saltWithIndex);
+            byte[] result = (byte[])u.Clone();
+
+            for (int i = 1; i < iterations; i++)
+            {
+                u = hmac.ComputeHash(u);
+                XorInPlace(result, u);
+            }
+
+            return result;
+        }
+    }
+
+    private void XorInPlace(byte[] target, byte[] source)
+    {
+        for (int i = 0; i < target.Length; i++)
+        {
+            target[i] ^= source[i];
+        }
+    }
+    
+    private string SaslPrep(string input)
+    {
+        // Simplified SASLprep - for production, use proper normalization
+        // This handles basic cases but may need RFC 4013 compliance
+        return input.Normalize(NormalizationForm.FormKC);
     }
 }

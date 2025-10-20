@@ -1,9 +1,10 @@
 using System.Buffers.Binary;
+using System.Net.Sockets;
 using System.Text;
 
 namespace PgClient;
 
-public class BufferReader: IDisposable
+public class BufferReader : IDisposable
 {
     private byte[] _buffer;
     private int _offset;
@@ -118,6 +119,30 @@ public class BufferReader: IDisposable
     {
         Ensure(count);
         _offset += count;
+    }
+
+
+    public byte[] ReadAllBytesFromStream(NetworkStream stream)
+    {
+        if (stream == null)
+            throw new ArgumentNullException(nameof(stream));
+
+        using (var memoryStream = new MemoryStream())
+        {
+            byte[] buffer = new byte[8192]; // 8 KB buffer
+            int bytesRead;
+
+            // Keep reading until no more data
+            while ((bytesRead = stream.Read(buffer, 0, buffer.Length)) > 0)
+            {
+                memoryStream.Write(buffer, 0, bytesRead);
+
+                // Optional: break if stream indicates end of message
+                // e.g. if (stream.DataAvailable == false) break;
+            }
+
+            return memoryStream.ToArray();
+        }
     }
 
     /// <summary>

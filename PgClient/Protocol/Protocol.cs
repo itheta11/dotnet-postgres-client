@@ -12,7 +12,7 @@ namespace PgClient.Protocol
         // ------------------------------------------------------------------------
         // PostgreSQL Protocol Version (currently 3.0)
         // ------------------------------------------------------------------------
-        public const int ProtocolVersion = 0x00030000; // 196608 decimal
+        public const int ProtocolVersion = 3; // 196608 decimal
 
         // ------------------------------------------------------------------------
         // Special Startup Request Codes (no message type byte)
@@ -61,7 +61,7 @@ namespace PgClient.Protocol
             Authentication = (byte)'R',
             BackendKeyData = (byte)'K',
             ParameterStatus = (byte)'S',
-            ReadyForQuery = (byte)'Z',
+            ReadyForQuery = (byte)'Z',  
 
             // Query results
             RowDescription = (byte)'T',
