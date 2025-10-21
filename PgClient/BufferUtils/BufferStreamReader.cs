@@ -21,7 +21,7 @@ public class BufferStreamReader : IAsyncDisposable, IDisposable
         EnsureNotDisposed();
 
         // Read header (1 byte for code, 4 bytes for length)
-        ReadExact(stream,_headerBuffer, 0, 5);
+        ReadExact(stream, _headerBuffer, 0, 5);
 
         byte code = _headerBuffer[0];
         int length = ReadInt32(_headerBuffer, 1); // total length includes itself
@@ -43,6 +43,21 @@ public class BufferStreamReader : IAsyncDisposable, IDisposable
         Buffer.BlockCopy(_payloadBuffer, 0, result, 0, payloadLength);
         var c = Encoding.UTF8.GetString(result);
         return (code, length, result);
+    }
+    
+    public (byte Code, byte[] Payload) ReadQueryMessage(Stream stream)
+    {
+        int type = stream.ReadByte();
+        if (type == -1)
+            throw new IOException("Unexpected end of stream");
+        byte[] lengthBuffer = new byte[4];
+        stream.ReadExactly(lengthBuffer, 0, 4);
+        int length = BitConverter.ToInt32(lengthBuffer.Reverse().ToArray()); // Big-endian
+
+        var payload = new byte[length - 4];
+        stream.ReadExactly(payload, 0, payload.Length);
+
+        return ((byte)type, payload);
     }
 
     private static int ReadInt32(byte[] buffer, int offset)

@@ -1,8 +1,9 @@
 using System;
 using System.Buffers.Binary;
 using System.Net.Sockets;
+using System.Text;
 
-namespace PgClient;
+namespace PgClient.Utilities;
 
 public static class Helper
 {
@@ -26,6 +27,20 @@ public static class Helper
         return (buf[0] << 24) | (buf[1] << 16) | (buf[2] << 8) | buf[3];
     }
 
+    public static int ReadInt32(BinaryReader r)
+    {
+        var b = r.ReadBytes(4);
+        if (BitConverter.IsLittleEndian) Array.Reverse(b);
+        return BitConverter.ToInt32(b, 0);
+    }
+
+    public static short ReadInt16(BinaryReader r)
+    {
+        var b = r.ReadBytes(2);
+        if (BitConverter.IsLittleEndian) Array.Reverse(b);
+        return BitConverter.ToInt16(b, 0);
+    }
+
     public static short ReadInt16(Stream s)
     {
         byte[] buf = new byte[2];
@@ -42,6 +57,15 @@ public static class Helper
         return sb.ToString();
     }
 
+    public static string ReadCString(BinaryReader r)
+    {
+        var bytes = new List<byte>();
+        byte b;
+        while ((b = r.ReadByte()) != 0)
+            bytes.Add(b);
+        return Encoding.UTF8.GetString(bytes.ToArray());
+    }
+
     public static int ToBigEndian(int value)
         => ((value & 0xFF) << 24) | ((value & 0xFF00) << 8)
          | ((value >> 8) & 0xFF00) | ((value >> 24) & 0xFF);
@@ -51,5 +75,19 @@ public static class Helper
         Span<byte> span = stackalloc byte[4];
         BinaryPrimitives.WriteInt32BigEndian(span, value);
         w.Write(span.ToArray());
+    }
+
+    public static void WriteInt32(Stream s, int value)
+    {
+        var bytes = BitConverter.GetBytes(value);
+        if (BitConverter.IsLittleEndian) Array.Reverse(bytes);
+        s.Write(bytes, 0, 4);
+    }
+
+    public static void WriteInt32(Span<byte> s, int value)
+    {
+        var bytes = BitConverter.GetBytes(value);
+        if (BitConverter.IsLittleEndian) Array.Reverse(bytes);
+        bytes.CopyTo(s);
     }
 }

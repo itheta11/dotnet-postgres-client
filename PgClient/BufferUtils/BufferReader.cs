@@ -2,11 +2,11 @@ using System.Buffers.Binary;
 using System.Net.Sockets;
 using System.Text;
 
-namespace PgClient;
+namespace PgClient.BufferUtils;
 
 public class BufferReader : IDisposable
 {
-    private byte[] _buffer;
+    public byte[] _buffer;
     private int _offset;
 
     public int Remaining => _buffer.Length - _offset;

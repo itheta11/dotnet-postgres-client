@@ -3,8 +3,11 @@ using System.Runtime.CompilerServices;
 using System.Text;
 using System.Threading.Tasks;
 using PgClient;
+using PgClient.Utilities;
 using PgClient.MessageController;
 using PgClient.Protocol;
+using PgClient.Response;
+using PgClient.QueryController;
 
 public class PgConnection : IAsyncDisposable, IDisposable
 {
@@ -16,6 +19,9 @@ public class PgConnection : IAsyncDisposable, IDisposable
     private readonly SemaphoreSlim _stateLock = new(1, 1);
 
     public PgConnectionState _connectionState { get; private set; } = PgConnectionState.Disconnected;
+
+    private int _Pid;
+    private int _SecretKey;
     public PgConnection(ConnectionParameters connectionParams)
     {
         _connectionParams = connectionParams;
@@ -44,8 +50,7 @@ public class PgConnection : IAsyncDisposable, IDisposable
             };
             SendStartupMessage(connectionDict);
             MessageController messageController = new MessageController(_connectionParams);
-            messageController.HandleMessages(_networkStream);
-            _connectionState = PgConnectionState.Ready;
+            (_connectionState, _Pid, _SecretKey) = messageController.HandleBackendMessages(_networkStream);
         }
         catch (Exception ex)
         {
@@ -58,8 +63,26 @@ public class PgConnection : IAsyncDisposable, IDisposable
         }
     }
 
-    public void ExecuteQuery(string query)
+    public PgResult? ExecuteQuery(string query)
     {
+        ThrowIfDisposed();
+        _stateLock.Wait();
+        PgResult? result = null;
+        try
+        {
+            QueryController controller = new QueryController();
+            result = controller.HandleBackendQueryMessages(_networkStream, query);
+            return result;
+        }
+        catch (Exception ex)
+        {
+            _connectionState = PgConnectionState.Faulted;
+            throw;
+        }
+        finally
+        {
+            _stateLock.Release();
+        }
 
     }
 
@@ -67,7 +90,7 @@ public class PgConnection : IAsyncDisposable, IDisposable
     {
         _tcpClient?.Close();
         _networkStream?.Dispose();
-        _stateLock.Release();
+        _stateLock.Dispose();
         _connectionState = PgConnectionState.Closed;
 
     }

@@ -5,6 +5,7 @@ using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
 using System.Text;
 using PgClient;
+using PgClient.Utilities;
 namespace PgClient;
 
 public class TestWorkingClient

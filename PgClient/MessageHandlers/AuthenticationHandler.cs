@@ -3,8 +3,11 @@ using System.Net.Sockets;
 using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
 using System.Text;
+using PgClient.BufferUtils;
 using PgClient.Protocol;
-namespace PgClient.Authentication;
+using PgClient.Utilities;
+
+namespace PgClient.MessageHandlers;
 
 public class AuthenticationHandler
 {
@@ -165,20 +168,17 @@ public class AuthenticationHandler
             {
                 int index = p.IndexOf("r=");
                 serverNonce = p.Substring(index + 2);
-                //serverNonce = "/J6vYp8OMZMcH+aAe8c0PaEkM+LJh9c16Tm8cfhoMROnId1s";
                 _serverNonce = serverNonce;
             }
             else if (p.StartsWith("s="))
             {
                 int index = p.IndexOf("s=");
                 saltB64 = p.Substring(index + 2);
-                //saltB64 = "hmg0S4alnHPaCBMJDTR5mA==";
             }
             else if (p.StartsWith("i="))
             {
                 int index = p.IndexOf("i=");
                 iterations = int.Parse(p.Substring(index + 2));
-                //iterations = 4096;
             }
         }
 
@@ -189,11 +189,9 @@ public class AuthenticationHandler
         string clientFinalWithoutProof = $"c=biws,r={serverNonce}";
 
         string authMessage = $"{_clientFirstMessagebare},{firstServerMessage},{clientFinalWithoutProof}";
-        //string authMessage = "n=*,r=/J6vYp8OMZMcH+aAe8c0PaEk,r=/J6vYp8OMZMcH+aAe8c0PaEkM+LJh9c16Tm8cfhoMROnId1s,s=hmg0S4alnHPaCBMJDTR5mA==,i=4096,c=biws,r=/J6vYp8OMZMcH+aAe8c0PaEkM+LJh9c16Tm8cfhoMROnId1s";
         Console.WriteLine($"auth message - {authMessage}");
         byte[] salt = Convert.FromBase64String(saltB64);
         byte[] saltedPasswordBytes = PBKDF2SHA256(_connectionParams.Password, salt, iterations);
-        //byte[] saltedPasswordBytes = Hi(Encoding.UTF8.GetBytes(SaslPrep(_connectionParams.Password)), salt, iterations);
 
         return (authMessage, saltedPasswordBytes);
     }
@@ -220,12 +218,7 @@ public class AuthenticationHandler
         byte[] clientProof = Xor(clientKey, clientSignature);
         string clientProofB64 = Convert.ToBase64String(clientProof);
 
-        // clientFinalMessage = clientFinalWithoutProof + ",p=<clientProofB64>"
-        // clientFinalWithoutProof; it is "c=biws,r=<serverNonce>" — but authMessage contains it as last part;
-        // extract the final part from authMessage: authMessage = clientFirstBare + "," + serverFirst + "," + clientFinalWithoutProof
-        string clientFinalWithoutProof = authMessage.Substring(authMessage.LastIndexOf(',') + 1); // last segment
         string clientFinalMessage = $"c=biws,r={_serverNonce},p={clientProofB64}";
-        ///c=biws,r=/J6vYp8OMZMcH+aAe8c0PaEkM+LJh9c16Tm8cfhoMROnId1s,p=+9JcUS6n9iVWjPrqI6bpXHtdptjXlRGg/Nv1RgJhC4k=
         Console.WriteLine($"Client final message - {clientFinalMessage}");
         byte[] finalBytes = Encoding.UTF8.GetBytes(clientFinalMessage);
         int totalLength = finalBytes.Length + 4;
@@ -268,7 +261,11 @@ public class AuthenticationHandler
         var parts = serverFinal.Split(',');
         foreach (var p in parts)
         {
-            if (p.StartsWith("v=")) vPart = p.Substring(2);
+            if (p.Contains("v="))
+            {
+                int index = p.IndexOf("v=");
+                vPart = p.Substring(index + 2);
+            } 
         }
         if (vPart == null)
         {

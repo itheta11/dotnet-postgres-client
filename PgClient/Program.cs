@@ -10,8 +10,8 @@ ConnectionParameters connectionParameters = new ConnectionParameters()
 {
     Hostname = "host.docker.internal",
     Port = 5432,
-    Username = "anup",
-    Password = "anup123",
+    Username = "admin",
+    Password = "admin123",
     Database = "testdb",
     ApplicationName = "pgclient",
     FallbackApplicationName = "pgclient",
@@ -19,7 +19,7 @@ ConnectionParameters connectionParameters = new ConnectionParameters()
 
 using PgConnection pgConnection = new PgConnection(connectionParameters);
 await pgConnection.ConnectAsync();
-pgConnection.ExecuteQuery("");
+var res = pgConnection.ExecuteQuery("Select * from movie");
 pgConnection.Close();
 
 
