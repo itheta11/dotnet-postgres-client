@@ -40,7 +40,7 @@ public class AuthenticationHandler
         switch ((PostgresProtocol.AuthenticationCode)authType)
         {
             case PostgresProtocol.AuthenticationCode.Ok:
-                Console.WriteLine("Authentication successful");
+                //Console.WriteLine("Authentication successful");
                 break;
             case PostgresProtocol.AuthenticationCode.SASL:
                 ///Client → SASLInitialResponse
@@ -189,7 +189,7 @@ public class AuthenticationHandler
         string clientFinalWithoutProof = $"c=biws,r={serverNonce}";
 
         string authMessage = $"{_clientFirstMessagebare},{firstServerMessage},{clientFinalWithoutProof}";
-        Console.WriteLine($"auth message - {authMessage}");
+        //Console.WriteLine($"auth message - {authMessage}");
         byte[] salt = Convert.FromBase64String(saltB64);
         byte[] saltedPasswordBytes = PBKDF2SHA256(_connectionParams.Password, salt, iterations);
 
@@ -219,7 +219,7 @@ public class AuthenticationHandler
         string clientProofB64 = Convert.ToBase64String(clientProof);
 
         string clientFinalMessage = $"c=biws,r={_serverNonce},p={clientProofB64}";
-        Console.WriteLine($"Client final message - {clientFinalMessage}");
+        //Console.WriteLine($"Client final message - {clientFinalMessage}");
         byte[] finalBytes = Encoding.UTF8.GetBytes(clientFinalMessage);
         int totalLength = finalBytes.Length + 4;
         using var ms = new MemoryStream();
@@ -270,7 +270,7 @@ public class AuthenticationHandler
         if (vPart == null)
         {
             // No server signature provided — can't validate, but continue.
-            Console.WriteLine("No server signature provided to validate.");
+            //Console.WriteLine("No server signature provided to validate.");
             return;
         }
 

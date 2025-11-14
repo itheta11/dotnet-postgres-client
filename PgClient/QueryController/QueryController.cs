@@ -34,7 +34,7 @@ public class QueryController
                 case PostgresProtocol.BackendMessageCode.CommandComplete:
                     break;
                 case PostgresProtocol.BackendMessageCode.ErrorResponse:
-                    Console.WriteLine($"server error {Encoding.UTF8.GetString(payload)}");
+                    //Console.WriteLine($"server error {Encoding.UTF8.GetString(payload)}");
                     throw new Exception($"server error {Encoding.UTF8.GetString(payload)}");
                 case PostgresProtocol.BackendMessageCode.ReadyForQuery:
                     return result;

@@ -1,0 +1,65 @@
+first benchmark
+
+Mean = 172.518 ms, StdErr = 1.007 ms (0.58%), N = 96, StdDev = 9.869 ms
+Min = 152.641 ms, Q1 = 165.825 ms, Median = 170.734 ms, Q3 = 179.112 ms, Max = 198.741 ms
+IQR = 13.287 ms, LowerFence = 145.895 ms, UpperFence = 199.042 ms
+ConfidenceInterval = [169.098 ms; 175.939 ms] (CI 99.9%), Margin = 3.421 ms (1.98% of Mean)
+Skewness = 0.49, Kurtosis = 2.76, MValue = 2
+
+// ** Remained 0 (0.0%) benchmark(s) to run. Estimated finish 2025-11-14 17:51 (0h 0m from now) **
+// ***** BenchmarkRunner: Finish  *****
+
+// * Export *
+  BenchmarkDotNet.Artifacts/results/PgClient.Benchmark.Benchmark-report.csv
+  BenchmarkDotNet.Artifacts/results/PgClient.Benchmark.Benchmark-report-github.md
+  BenchmarkDotNet.Artifacts/results/PgClient.Benchmark.Benchmark-report.html
+
+// * Detailed results *
+Benchmark.AnalysePgClient: DefaultJob
+Runtime = .NET 9.0.10 (9.0.10, 9.0.1025.47515), Arm64 RyuJIT armv8.0-a; GC = Concurrent Workstation
+Mean = 172.518 ms, StdErr = 1.007 ms (0.58%), N = 96, StdDev = 9.869 ms
+Min = 152.641 ms, Q1 = 165.825 ms, Median = 170.734 ms, Q3 = 179.112 ms, Max = 198.741 ms
+IQR = 13.287 ms, LowerFence = 145.895 ms, UpperFence = 199.042 ms
+ConfidenceInterval = [169.098 ms; 175.939 ms] (CI 99.9%), Margin = 3.421 ms (1.98% of Mean)
+Skewness = 0.49, Kurtosis = 2.76, MValue = 2
+-------------------- Histogram --------------------
+[149.813 ms ; 154.225 ms) | @
+[154.225 ms ; 159.721 ms) | @@@@@
+[159.721 ms ; 165.562 ms) | @@@@@@@@@@@@@@@@@
+[165.562 ms ; 171.220 ms) | @@@@@@@@@@@@@@@@@@@@@@@@@@@
+[171.220 ms ; 177.728 ms) | @@@@@@@@@@@@@@@@@@@@
+[177.728 ms ; 184.457 ms) | @@@@@@@@@@@@@@@
+[184.457 ms ; 191.892 ms) | @@@@@@@
+[191.892 ms ; 199.276 ms) | @@@@
+---------------------------------------------------
+
+// * Summary *
+
+BenchmarkDotNet v0.15.4, Linux Debian GNU/Linux 12 (bookworm) (container)
+-
+.NET SDK 9.0.306
+  [Host]     : .NET 9.0.10 (9.0.10, 9.0.1025.47515), Arm64 RyuJIT armv8.0-a
+  DefaultJob : .NET 9.0.10 (9.0.10, 9.0.1025.47515), Arm64 RyuJIT armv8.0-a
+
+
+| Method          | Mean     | Error   | StdDev  | Allocated |
+|---------------- |---------:|--------:|--------:|----------:|
+| AnalysePgClient | 172.5 ms | 3.42 ms | 9.87 ms |  23.73 KB |
+
+// * Legends *
+  Mean      : Arithmetic mean of all measurements
+  Error     : Half of 99.9% confidence interval
+  StdDev    : Standard deviation of all measurements
+  Allocated : Allocated memory per single operation (managed only, inclusive, 1KB = 1024B)
+  1 ms      : 1 Millisecond (0.001 sec)
+
+// * Diagnostic Output - MemoryDiagnoser *
+
+
+// ***** BenchmarkRunner: End *****
+Run time: 00:01:12 (72.88 sec), executed benchmarks: 1
+
+Global total time: 00:01:15 (75.73 sec), executed benchmarks: 1
+// * Artifacts cleanup *
+Artifacts cleanup is finished
+----------------------------------

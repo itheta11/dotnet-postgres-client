@@ -34,19 +34,19 @@ public class MessageController
                     break;
 
                 case PostgresProtocol.BackendMessageCode.ParameterStatus:
-                    Console.WriteLine($"Parameter {Encoding.UTF8.GetString(payload)}");
+                    ////Console.WriteLine($"Parameter {Encoding.UTF8.GetString(payload)}");
                     break;
 
                 case PostgresProtocol.BackendMessageCode.BackendKeyData:
-                    Console.WriteLine($"Backend keyed data {Encoding.UTF8.GetString(payload)}");
+                    ////Console.WriteLine($"Backend keyed data {Encoding.UTF8.GetString(payload)}");
                     BackendKeyHandler backendKeyHandler = new BackendKeyHandler();
                     (_Pid, _SecretKey) = backendKeyHandler.HandleBankendKey(payload);
                     break;
                 case PostgresProtocol.BackendMessageCode.ReadyForQuery:
-                    Console.WriteLine($"Ready for query {Encoding.UTF8.GetString(payload)}");
+                    ////Console.WriteLine($"Ready for query {Encoding.UTF8.GetString(payload)}");
                     return (PgConnectionState.Ready, _Pid, _SecretKey);
                 case PostgresProtocol.BackendMessageCode.ErrorResponse:
-                    Console.WriteLine($"server error {Encoding.UTF8.GetString(payload)}");
+                    ////Console.WriteLine($"server error {Encoding.UTF8.GetString(payload)}");
                     throw new Exception($"server error {Encoding.UTF8.GetString(payload)}");
                 default:
                     break;
