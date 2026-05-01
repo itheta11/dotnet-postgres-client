@@ -34,10 +34,43 @@ public class QueryController
                 case PostgresProtocol.BackendMessageCode.CommandComplete:
                     break;
                 case PostgresProtocol.BackendMessageCode.ErrorResponse:
-                    //Console.WriteLine($"server error {Encoding.UTF8.GetString(payload)}");
+                    Console.WriteLine($"server error {Encoding.UTF8.GetString(payload)}");
                     throw new Exception($"server error {Encoding.UTF8.GetString(payload)}");
                 case PostgresProtocol.BackendMessageCode.ReadyForQuery:
                     return result;
+                default:
+                    break;
+            }
+
+        }
+    }
+
+    public async IAsyncEnumerable<List<string?>> HandleBackendQueryMessagesAsync(NetworkStream stream, string query)
+    {
+        SendQuery(stream, query);
+        while (true)
+        {
+            using BufferStreamReader reader = new BufferStreamReader();
+            var (code, payload) = await reader.ReadQueryMessageAsync(stream);
+
+            PostgresProtocol.BackendMessageCode msgCode = (PostgresProtocol.BackendMessageCode)code;
+
+            switch (msgCode)
+            {
+                case PostgresProtocol.BackendMessageCode.RowDescription:
+                    //result.Columns = ParseRowDescription(payload);
+                    break;
+                case PostgresProtocol.BackendMessageCode.DataRow:
+                    var row = ParseDataRowMessage(payload);
+                    yield return row;
+                    break;
+                case PostgresProtocol.BackendMessageCode.CommandComplete:
+                    break;
+                case PostgresProtocol.BackendMessageCode.ErrorResponse:
+                    Console.WriteLine($"server error {Encoding.UTF8.GetString(payload)}");
+                    throw new Exception($"server error {Encoding.UTF8.GetString(payload)}");
+                case PostgresProtocol.BackendMessageCode.ReadyForQuery:
+                    yield break;
                 default:
                     break;
             }
@@ -90,7 +123,7 @@ public class QueryController
         }
         return rows;
     }
-    
+
     private List<string?> ParseDataRowMessage(byte[] payload)
     {
         List<string?> row = new List<string>();

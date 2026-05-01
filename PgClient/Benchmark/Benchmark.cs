@@ -11,17 +11,23 @@ public class Benchmark
     {
         ConnectionParameters connectionParameters = new ConnectionParameters()
         {
-            Hostname = "aws-1-ap-south-1.pooler.supabase.com",
+            Hostname = "172.17.0.1",
             Port = 5432,
-            Username = "postgres.sjdxtmfvjsodboienfdy",
-            Password = "Anupadmin123@#",
-            Database = "postgres",
-            ApplicationName = "pgclient",
-            FallbackApplicationName = "pgclient",
+            Username = "admin",
+            Password = "",
+            Database = "movie",
+            ApplicationName = "",
+            FallbackApplicationName = "",
         };
         using PgConnection pgConnection = new PgConnection(connectionParameters);
         await pgConnection.ConnectAsync();
-        var res = pgConnection.ExecuteQuery("Select * from \"Movie\"");
+        string query = "SELECT * FROM Movies";
+        await foreach (var row in pgConnection.ExecuteReaderAsync(query))
+        {
+            //Console.WriteLine(string.Join(", ", row));
+        }
+        //var res = pgConnection.ExecuteQuery("Select * from Movies");
         pgConnection.Close();
+
     }
 }

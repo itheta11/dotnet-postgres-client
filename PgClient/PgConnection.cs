@@ -86,6 +86,25 @@ public class PgConnection : IAsyncDisposable, IDisposable
 
     }
 
+    public async IAsyncEnumerable<List<string?>> ExecuteReaderAsync(string query)
+    {
+        ThrowIfDisposed();
+        _stateLock.Wait();
+        try
+        {
+            QueryController controller = new QueryController();
+            await foreach (var row in controller.HandleBackendQueryMessagesAsync(_networkStream, query).ConfigureAwait(false))
+            {
+                yield return row;
+            }
+        }
+        finally
+        {
+            _stateLock.Release();
+        }
+
+    }
+
     public void Close()
     {
         _tcpClient?.Close();

@@ -41,10 +41,9 @@ public class BufferStreamReader : IAsyncDisposable, IDisposable
         // Copy into exact-sized array before returning
         var result = new byte[payloadLength];
         Buffer.BlockCopy(_payloadBuffer, 0, result, 0, payloadLength);
-        var c = Encoding.UTF8.GetString(result);
         return (code, length, result);
     }
-    
+
     public (byte Code, byte[] Payload) ReadQueryMessage(Stream stream)
     {
         int type = stream.ReadByte();
@@ -52,10 +51,29 @@ public class BufferStreamReader : IAsyncDisposable, IDisposable
             throw new IOException("Unexpected end of stream");
         byte[] lengthBuffer = new byte[4];
         stream.ReadExactly(lengthBuffer, 0, 4);
-        int length = BitConverter.ToInt32(lengthBuffer.Reverse().ToArray()); // Big-endian
+        // Big-endian
+        int length = ReadInt32(lengthBuffer, 0);
 
         var payload = new byte[length - 4];
         stream.ReadExactly(payload, 0, payload.Length);
+
+        return ((byte)type, payload);
+    }
+
+    public async Task<(byte Code, byte[] Payload)> ReadQueryMessageAsync(Stream stream)
+    {
+        byte[] typeBuffer = new byte[1];
+        await stream.ReadExactlyAsync(typeBuffer, 0, 1).ConfigureAwait(false);
+        int type = typeBuffer[0];
+        if (type == -1)
+            throw new IOException("Unexpected end of stream");
+
+        byte[] lengthBuffer = new byte[4];
+        await stream.ReadExactlyAsync(lengthBuffer, 0, 4).ConfigureAwait(false);
+        int length = ReadInt32(lengthBuffer, 0); // Big-endian
+
+        var payload = new byte[length - 4];
+        await stream.ReadExactlyAsync(payload, 0, payload.Length).ConfigureAwait(false);
 
         return ((byte)type, payload);
     }
@@ -69,7 +87,7 @@ public class BufferStreamReader : IAsyncDisposable, IDisposable
                buffer[offset + 3];
     }
 
-    private void ReadExact(Stream stream,byte[] buffer, int offset, int count)
+    private void ReadExact(Stream stream, byte[] buffer, int offset, int count)
     {
         int readTotal = 0;
         while (readTotal < count)
