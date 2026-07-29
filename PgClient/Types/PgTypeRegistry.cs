@@ -53,6 +53,18 @@ public sealed class PgTypeRegistry
         r.Register(new DateHandler());
         r.Register(new JsonHandler(PgOid.Json));
         r.Register(new JsonHandler(PgOid.Jsonb));
+
+        // Array handlers piggyback on the element handler above.
+        r.Register(new ArrayHandler(PgOid.BoolArray, new BoolHandler()));
+        r.Register(new ArrayHandler(PgOid.Int2Array, new Int2Handler()));
+        r.Register(new ArrayHandler(PgOid.Int4Array, new Int4Handler()));
+        r.Register(new ArrayHandler(PgOid.Int8Array, new Int8Handler()));
+        r.Register(new ArrayHandler(PgOid.Float4Array, new Float4Handler()));
+        r.Register(new ArrayHandler(PgOid.Float8Array, new Float8Handler()));
+        r.Register(new ArrayHandler(PgOid.TextArray, new TextHandler(PgOid.Text)));
+        r.Register(new ArrayHandler(PgOid.VarcharArray, new TextHandler(PgOid.Varchar)));
+        r.Register(new ArrayHandler(PgOid.UuidArray, new UuidHandler()));
+        r.Register(new ArrayHandler(PgOid.NumericArray, new NumericHandler()));
         return r;
     }
 }

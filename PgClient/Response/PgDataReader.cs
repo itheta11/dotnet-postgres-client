@@ -18,6 +18,7 @@ public sealed class PgDataReader : IAsyncDisposable, IDisposable
     private readonly Action<PostgresProtocol.TransactionStatus>? _onReadyForQuery;
     private readonly Action<PgErrorInfo>? _onNotice;
     private readonly Action<ReadOnlyMemory<byte>>? _onParameterStatus;
+    private readonly Action<int, string, string>? _onNotification;
 
     private FieldDescription[] _columns = Array.Empty<FieldDescription>();
     private byte[]?[] _currentRow = Array.Empty<byte[]?>();
@@ -32,13 +33,15 @@ public sealed class PgDataReader : IAsyncDisposable, IDisposable
         BufferStreamReader protocol,
         Action<PostgresProtocol.TransactionStatus>? onReadyForQuery = null,
         Action<PgErrorInfo>? onNotice = null,
-        Action<ReadOnlyMemory<byte>>? onParameterStatus = null)
+        Action<ReadOnlyMemory<byte>>? onParameterStatus = null,
+        Action<int, string, string>? onNotification = null)
     {
         _stream = stream;
         _protocol = protocol;
         _onReadyForQuery = onReadyForQuery;
         _onNotice = onNotice;
         _onParameterStatus = onParameterStatus;
+        _onNotification = onNotification;
     }
 
     public int FieldCount => _columns.Length;
@@ -88,7 +91,7 @@ public sealed class PgDataReader : IAsyncDisposable, IDisposable
                     break;
 
                 case PostgresProtocol.BackendMessageCode.NotificationResponse:
-                    // TODO: surface via connection-level event
+                    ParseAndDispatchNotification(payload);
                     break;
 
                 case PostgresProtocol.BackendMessageCode.ErrorResponse:
@@ -135,6 +138,20 @@ public sealed class PgDataReader : IAsyncDisposable, IDisposable
             var status = (PostgresProtocol.TransactionStatus)payload[0];
             _onReadyForQuery?.Invoke(status);
         }
+    }
+
+    private void ParseAndDispatchNotification(byte[] payload)
+    {
+        if (_onNotification is null) return;
+        var span = payload.AsSpan();
+        int pid = BinaryPrimitives.ReadInt32BigEndian(span);
+        int i = 4;
+        int nul = span.Slice(i).IndexOf((byte)0);
+        string channel = Encoding.UTF8.GetString(span.Slice(i, nul));
+        i += nul + 1;
+        nul = span.Slice(i).IndexOf((byte)0);
+        string message = Encoding.UTF8.GetString(span.Slice(i, nul));
+        _onNotification(pid, channel, message);
     }
 
     private static FieldDescription[] ParseRowDescription(byte[] payload)

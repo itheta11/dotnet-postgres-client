@@ -55,6 +55,9 @@ public sealed class PgConnection : IAsyncDisposable, IDisposable
     /// Raised for each server-sent NoticeResponse during a command.
     public event Action<PgErrorInfo>? Notice;
 
+    /// Raised for each LISTEN/NOTIFY notification received on this connection.
+    public event EventHandler<PgNotificationEventArgs>? Notification;
+
     public PgConnection(ConnectionParameters connectionParams)
     {
         _connectionParams = connectionParams;
@@ -137,7 +140,8 @@ public sealed class PgConnection : IAsyncDisposable, IDisposable
                 _protocolReader!,
                 query,
                 onReadyForQuery: tx => TransactionStatus = tx,
-                onNotice: n => Notice?.Invoke(n));
+                onNotice: n => Notice?.Invoke(n),
+                onNotification: RaiseNotification);
             return reader;
         }
         catch
@@ -204,7 +208,8 @@ public sealed class PgConnection : IAsyncDisposable, IDisposable
             var reader = new PgDataReader(
                 _stream!, _protocolReader!,
                 onReadyForQuery: tx => TransactionStatus = tx,
-                onNotice: n => Notice?.Invoke(n));
+                onNotice: n => Notice?.Invoke(n),
+                onNotification: RaiseNotification);
             return reader;
         }
         catch
@@ -235,9 +240,144 @@ public sealed class PgConnection : IAsyncDisposable, IDisposable
         return null;
     }
 
+    // ── Transactions ───────────────────────────────────────────────────────
+
+    /// Opens a transaction with the given isolation level.
+    public async Task<PgTransaction> BeginTransactionAsync(
+        System.Data.IsolationLevel isolationLevel = System.Data.IsolationLevel.ReadCommitted,
+        CancellationToken cancellationToken = default)
+    {
+        string sql = isolationLevel switch
+        {
+            System.Data.IsolationLevel.ReadUncommitted => "BEGIN ISOLATION LEVEL READ UNCOMMITTED",
+            System.Data.IsolationLevel.ReadCommitted => "BEGIN ISOLATION LEVEL READ COMMITTED",
+            System.Data.IsolationLevel.RepeatableRead => "BEGIN ISOLATION LEVEL REPEATABLE READ",
+            System.Data.IsolationLevel.Serializable => "BEGIN ISOLATION LEVEL SERIALIZABLE",
+            System.Data.IsolationLevel.Snapshot => "BEGIN ISOLATION LEVEL REPEATABLE READ",
+            System.Data.IsolationLevel.Unspecified => "BEGIN",
+            _ => "BEGIN",
+        };
+        await ExecuteNonQueryAsync(sql, cancellationToken).ConfigureAwait(false);
+        return new PgTransaction(this, isolationLevel);
+    }
+
+    // ── LISTEN/NOTIFY ──────────────────────────────────────────────────────
+
+    /// Blocks until the next NotificationResponse arrives (or the token cancels).
+    /// LISTEN itself must be issued with <see cref="ExecuteNonQueryAsync(string, CancellationToken)"/>.
+    public async Task WaitAsync(CancellationToken cancellationToken)
+    {
+        ThrowIfDisposed();
+        EnsureReady();
+        var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        void Handler(object? _, PgNotificationEventArgs __) => tcs.TrySetResult();
+        Notification += Handler;
+        try
+        {
+            using (cancellationToken.Register(() => tcs.TrySetCanceled(cancellationToken)))
+                await tcs.Task.ConfigureAwait(false);
+        }
+        finally
+        {
+            Notification -= Handler;
+        }
+    }
+
+    private void RaiseNotification(int pid, string channel, string payload)
+        => Notification?.Invoke(this, new PgNotificationEventArgs(pid, channel, payload));
+
+    // ── Cancel ─────────────────────────────────────────────────────────────
+
+    /// Sends a CancelRequest on a fresh TCP connection using this session's
+    /// backend PID and secret key. This is the only way to interrupt a long-
+    /// running query server-side. Safe to call from any thread.
+    public Task CancelAsync(CancellationToken cancellationToken = default)
+    {
+        if (ProcessId == 0 || SecretKey == 0)
+            throw new InvalidOperationException("Backend key data has not been received; cannot cancel.");
+
+        return PgCancelRequest.SendAsync(
+            _connectionParams.Hostname, _connectionParams.Port,
+            ProcessId, SecretKey, cancellationToken);
+    }
+
+    // ── COPY ───────────────────────────────────────────────────────────────
+
+    /// Begins a COPY FROM STDIN and returns a write-only stream. The caller
+    /// writes COPY payload bytes (CSV/TSV text or PGCOPY binary) and disposes
+    /// the stream to end the copy. The stream MUST be disposed before issuing
+    /// any other command.
+    public async Task<PgClient.Query.PgCopyInStream> BeginCopyInAsync(string sql, CancellationToken cancellationToken = default)
+    {
+        ThrowIfDisposed();
+        EnsureReady();
+        await _stateLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            PgQueryController.SendQuery(_stream!, sql);
+            ExpectCopyResponse((byte)PostgresProtocol.BackendMessageCode.CopyInResponse);
+            return new PgClient.Query.PgCopyInStream(_stream!, _protocolReader!, tx => TransactionStatus = tx);
+        }
+        catch
+        {
+            State = PgConnectionState.Faulted;
+            throw;
+        }
+        finally
+        {
+            _stateLock.Release();
+        }
+    }
+
+    /// Begins a COPY TO STDOUT and returns a read-only stream over the server's bytes.
+    public async Task<PgClient.Query.PgCopyOutStream> BeginCopyOutAsync(string sql, CancellationToken cancellationToken = default)
+    {
+        ThrowIfDisposed();
+        EnsureReady();
+        await _stateLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            PgQueryController.SendQuery(_stream!, sql);
+            ExpectCopyResponse((byte)PostgresProtocol.BackendMessageCode.CopyOutResponse);
+            return new PgClient.Query.PgCopyOutStream(_stream!, _protocolReader!, tx => TransactionStatus = tx);
+        }
+        catch
+        {
+            State = PgConnectionState.Faulted;
+            throw;
+        }
+        finally
+        {
+            _stateLock.Release();
+        }
+    }
+
+    private void ExpectCopyResponse(byte expected)
+    {
+        while (true)
+        {
+            var (code, _, payload) = _protocolReader!.ReadMessage(_stream!);
+            if (code == expected) return;
+            if (code == (byte)PostgresProtocol.BackendMessageCode.NoticeResponse)
+            {
+                Notice?.Invoke(PgErrorInfo.Parse(payload));
+                continue;
+            }
+            if (code == (byte)PostgresProtocol.BackendMessageCode.ErrorResponse)
+            {
+                var info = PgErrorInfo.Parse(payload);
+                DrainToReadyForQuery();
+                throw new PgException(info);
+            }
+            if (code == (byte)PostgresProtocol.BackendMessageCode.ReadyForQuery)
+                throw new InvalidOperationException("Server did not enter COPY mode for the given SQL.");
+        }
+    }
+
     // ── Pool integration ───────────────────────────────────────────────────
 
-    internal void MarkRented() { /* placeholder for future counters */ }
+    /// Called by the pool immediately before handing the connection to a caller.
+    internal void MarkRented() { /* placeholder */ }
 
     /// Resets session state and readies the connection for the next borrower.
     internal void MarkIdle()

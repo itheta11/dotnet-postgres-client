@@ -28,4 +28,22 @@ public static class PgOid
     public const uint Numeric = 1700;
     public const uint Uuid = 2950;
     public const uint Jsonb = 3802;
+
+    // Array OIDs (typarray column in pg_type).
+    public const uint BoolArray = 1000;
+    public const uint ByteaArray = 1001;
+    public const uint Int2Array = 1005;
+    public const uint Int4Array = 1007;
+    public const uint TextArray = 1009;
+    public const uint VarcharArray = 1015;
+    public const uint Int8Array = 1016;
+    public const uint Float4Array = 1021;
+    public const uint Float8Array = 1022;
+    public const uint UuidArray = 2951;
+    public const uint NumericArray = 1231;
+    public const uint TimestampArray = 1115;
+    public const uint TimestampTzArray = 1185;
+    public const uint DateArray = 1182;
+    public const uint JsonArray = 199;
+    public const uint JsonbArray = 3807;
 }

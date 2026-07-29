@@ -16,10 +16,11 @@ public sealed class PgQueryController
         string query,
         Action<PostgresProtocol.TransactionStatus>? onReadyForQuery = null,
         Action<PgErrorInfo>? onNotice = null,
-        Action<ReadOnlyMemory<byte>>? onParameterStatus = null)
+        Action<ReadOnlyMemory<byte>>? onParameterStatus = null,
+        Action<int, string, string>? onNotification = null)
     {
         SendQuery(stream, query);
-        return new PgDataReader(stream, protocolReader, onReadyForQuery, onNotice, onParameterStatus);
+        return new PgDataReader(stream, protocolReader, onReadyForQuery, onNotice, onParameterStatus, onNotification);
     }
 
     /// Writes a simple-query message: Q | Int32 length | CString query
