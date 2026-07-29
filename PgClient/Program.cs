@@ -1,31 +1,40 @@
-﻿using System.Text;
-using BenchmarkDotNet.Running;
 using PgClient;
-using PgClient.Benchmark;
 
-//var summary = BenchmarkRunner.Run<Benchmark>();
-
-ConnectionParameters connectionParameters = new ConnectionParameters()
+var parameters = new ConnectionParameters
 {
-    Hostname = "172.17.0.1",
+    Hostname = "localhost",
     Port = 5432,
     Username = "admin",
     Password = "anup",
     Database = "movie",
-    ApplicationName = "",
+    ApplicationName = "PgClientSample",
     FallbackApplicationName = "",
 };
 
-using PgConnection pgConnection = new PgConnection(connectionParameters);
-await pgConnection.ConnectAsync();
-string query = "SELECT * FROM Movies ORDER BY movieid LIMIT 10; ";
-await foreach (var row in pgConnection.ExecuteReaderAsync(query))
-{
-    Console.WriteLine(string.Join(", ", row));
-}
-//var res = pgConnection.ExecuteQuery("Select * from Movies");
-pgConnection.Close();
+await using var connection = new PgConnection(parameters);
+connection.Notice += n => Console.WriteLine($"NOTICE: {n}");
 
+await connection.ConnectAsync();
+
+const string query = "SELECT * FROM Movies ORDER BY movieid LIMIT 10;";
+await using (var reader = await connection.ExecuteReaderAsync(query))
+{
+    for (int i = 0; i < reader.FieldCount; i++)
+    {
+        Console.Write(reader.GetName(i));
+        Console.Write(i == reader.FieldCount - 1 ? "\n" : "\t");
+    }
+
+    while (await reader.ReadAsync())
+    {
+        for (int i = 0; i < reader.FieldCount; i++)
+        {
+            Console.Write(reader.IsDBNull(i) ? "NULL" : reader.GetString(i));
+            Console.Write(i == reader.FieldCount - 1 ? "\n" : "\t");
+        }
+    }
+
+    Console.WriteLine($"Command tag: {reader.CommandTag.Operation} rows={reader.CommandTag.RowsAffected}");
+}
 
 Console.WriteLine("Completed");
-

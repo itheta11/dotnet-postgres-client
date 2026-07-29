@@ -1,29 +1,36 @@
 using System.Buffers.Binary;
-using System.Net.Sockets;
 using System.Text;
 
 namespace PgClient.BufferUtils;
 
-public class BufferReader : IDisposable
+/// Zero-copy reader over a Postgres message payload.
+/// Internally aliases a caller-owned buffer; does not allocate on construction.
+public sealed class BufferReader
 {
-    public byte[] _buffer;
+    private ReadOnlyMemory<byte> _buffer;
     private int _offset;
 
     public int Remaining => _buffer.Length - _offset;
     public int Position => _offset;
     public int Length => _buffer.Length;
-    private bool _disposed;
 
-    public BufferReader()
+    public void SetBuffer(ReadOnlyMemory<byte> buffer)
     {
+        _buffer = buffer;
+        _offset = 0;
     }
 
-    /// <summary>
-    /// Assigns the byte buffer to read from.
-    /// </summary>
-    public void SetBuffer(ReadOnlySpan<byte> buffer)
+    public void SetBuffer(byte[] buffer)
     {
-        _buffer = buffer.ToArray();
+        _buffer = buffer;
+        _offset = 0;
+    }
+
+    public void SetBufferCopy(ReadOnlySpan<byte> buffer)
+    {
+        var copy = new byte[buffer.Length];
+        buffer.CopyTo(copy);
+        _buffer = copy;
         _offset = 0;
     }
 
@@ -36,13 +43,13 @@ public class BufferReader : IDisposable
     public byte ReadByte()
     {
         Ensure(1);
-        return _buffer[_offset++];
+        return _buffer.Span[_offset++];
     }
 
     public short ReadInt16()
     {
         Ensure(2);
-        short value = BinaryPrimitives.ReadInt16BigEndian(_buffer.AsSpan().Slice(_offset, 2));
+        short value = BinaryPrimitives.ReadInt16BigEndian(_buffer.Span.Slice(_offset, 2));
         _offset += 2;
         return value;
     }
@@ -50,7 +57,7 @@ public class BufferReader : IDisposable
     public int ReadInt32()
     {
         Ensure(4);
-        int value = BinaryPrimitives.ReadInt32BigEndian(_buffer.AsSpan().Slice(_offset, 4));
+        int value = BinaryPrimitives.ReadInt32BigEndian(_buffer.Span.Slice(_offset, 4));
         _offset += 4;
         return value;
     }
@@ -58,120 +65,54 @@ public class BufferReader : IDisposable
     public uint ReadUInt32()
     {
         Ensure(4);
-        uint value = BinaryPrimitives.ReadUInt32BigEndian(_buffer.AsSpan().Slice(_offset, 4));
+        uint value = BinaryPrimitives.ReadUInt32BigEndian(_buffer.Span.Slice(_offset, 4));
         _offset += 4;
         return value;
     }
 
-    /// <summary>
-    /// Reads a null-terminated UTF-8 string (C-style, used heavily in Postgres).
-    /// </summary>
+    /// Reads a null-terminated UTF-8 string.
     public string ReadCString()
     {
+        var span = _buffer.Span;
         int start = _offset;
-        while (_offset < _buffer.Length && _buffer[_offset] != 0)
+        while (_offset < span.Length && span[_offset] != 0)
             _offset++;
 
-        if (_offset >= _buffer.Length)
+        if (_offset >= span.Length)
             throw new InvalidOperationException("CString not null-terminated.");
 
-        string value = Encoding.UTF8.GetString(_buffer.AsSpan().Slice(start, _offset - start));
-        _offset++; // Skip the null terminator
+        string value = Encoding.UTF8.GetString(span.Slice(start, _offset - start));
+        _offset++; // skip terminator
         return value;
     }
 
-    /// <summary>
-    /// Reads a UTF-8 string prefixed by a 4-byte Big Endian length.
-    /// Returns null if the length is -1.
-    /// </summary>
+    /// Reads a UTF-8 string prefixed with a 4-byte big-endian length. -1 → null.
     public string? ReadString()
     {
-        int length = ReadInt32(); // Big Endian length prefix
-        if (length == -1)
-            return null;
-
-        if (length < 0)
-            throw new InvalidOperationException($"Invalid string length: {length}");
+        int length = ReadInt32();
+        if (length == -1) return null;
+        if (length < 0) throw new InvalidOperationException($"Invalid string length: {length}");
 
         Ensure(length);
-        string value = Encoding.UTF8.GetString(_buffer.AsSpan().Slice(_offset, length));
+        string value = Encoding.UTF8.GetString(_buffer.Span.Slice(_offset, length));
         _offset += length;
         return value;
     }
 
-    // ---------- Raw Data Readers ----------
-
-    /// <summary>
-    /// Reads raw bytes of the specified length.
-    /// </summary>
+    /// Returns a slice of the internal buffer without copying.
     public ReadOnlySpan<byte> ReadBytes(int length)
     {
         Ensure(length);
-        var span = _buffer.AsSpan();
+        var slice = _buffer.Span.Slice(_offset, length);
         _offset += length;
-        return span;
+        return slice;
     }
 
-    /// <summary>
-    /// Skips a given number of bytes.
-    /// </summary>
     public void Skip(int count)
     {
         Ensure(count);
         _offset += count;
     }
 
-
-    public byte[] ReadAllBytesFromStream(NetworkStream stream)
-    {
-        if (stream == null)
-            throw new ArgumentNullException(nameof(stream));
-
-        using (var memoryStream = new MemoryStream())
-        {
-            byte[] buffer = new byte[8192]; // 8 KB buffer
-            int bytesRead;
-
-            // Keep reading until no more data
-            while ((bytesRead = stream.Read(buffer, 0, buffer.Length)) > 0)
-            {
-                memoryStream.Write(buffer, 0, bytesRead);
-
-                // Optional: break if stream indicates end of message
-                // e.g. if (stream.DataAvailable == false) break;
-            }
-
-            return memoryStream.ToArray();
-        }
-    }
-
-    /// <summary>
-    /// Resets reading position to start.
-    /// </summary>
     public void Reset() => _offset = 0;
-
-    public void Dispose()
-    {
-        Dispose(true);
-        GC.SuppressFinalize(this);
-    }
-    protected virtual void Dispose(bool disposing)
-    {
-        if (!_disposed)
-        {
-            if (disposing)
-            {
-                _buffer = null!;
-                _offset = 0;
-            }
-            _disposed = true;
-        }
-
-    }
-
-    ~BufferReader()
-    {
-        Dispose(false);
-    }
-
 }

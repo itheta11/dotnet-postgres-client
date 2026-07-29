@@ -1,6 +1,3 @@
-using System;
-using System.ComponentModel;
-using System.Net.Sockets;
 using System.Text;
 using PgClient.BufferUtils;
 using PgClient.Protocol;
@@ -9,145 +6,49 @@ using PgClient.Utilities;
 
 namespace PgClient.QueryController;
 
-public class QueryController
+public sealed class PgQueryController
 {
-    public PgResult HandleBackendQueryMessages(NetworkStream stream, string query)
-    {
-        PgResult result = new PgResult();
-        SendQuery(stream, query);
-        while (true)
-        {
-            using BufferStreamReader reader = new BufferStreamReader();
-            var (code, payload) = reader.ReadQueryMessage(stream);
-
-            PostgresProtocol.BackendMessageCode msgCode = (PostgresProtocol.BackendMessageCode)code;
-
-            switch (msgCode)
-            {
-                case PostgresProtocol.BackendMessageCode.RowDescription:
-                    result.Columns = ParseRowDescription(payload);
-                    break;
-                case PostgresProtocol.BackendMessageCode.DataRow:
-                    var row = ParseDataRowMessage(payload);
-                    result.Rows.Add(row);
-                    break;
-                case PostgresProtocol.BackendMessageCode.CommandComplete:
-                    break;
-                case PostgresProtocol.BackendMessageCode.ErrorResponse:
-                    Console.WriteLine($"server error {Encoding.UTF8.GetString(payload)}");
-                    throw new Exception($"server error {Encoding.UTF8.GetString(payload)}");
-                case PostgresProtocol.BackendMessageCode.ReadyForQuery:
-                    return result;
-                default:
-                    break;
-            }
-
-        }
-    }
-
-    public async IAsyncEnumerable<List<string?>> HandleBackendQueryMessagesAsync(NetworkStream stream, string query)
+    /// Executes a simple-protocol Query and returns a streaming reader over the results.
+    /// The reader must be disposed to drain the connection back to ReadyForQuery.
+    public PgDataReader ExecuteReader(
+        Stream stream,
+        BufferStreamReader protocolReader,
+        string query,
+        Action<PostgresProtocol.TransactionStatus>? onReadyForQuery = null,
+        Action<PgErrorInfo>? onNotice = null,
+        Action<ReadOnlyMemory<byte>>? onParameterStatus = null)
     {
         SendQuery(stream, query);
-        while (true)
+        return new PgDataReader(stream, protocolReader, onReadyForQuery, onNotice, onParameterStatus);
+    }
+
+    /// Writes a simple-query message: Q | Int32 length | CString query
+    public static void SendQuery(Stream stream, string query)
+    {
+        int queryByteCount = Encoding.UTF8.GetByteCount(query);
+        int totalLen = 1 + 4 + queryByteCount + 1; // code + length + query + NUL
+        int payloadLen = 4 + queryByteCount + 1;   // length prefix + query + NUL
+
+        byte[] buffer = System.Buffers.ArrayPool<byte>.Shared.Rent(totalLen);
+        try
         {
-            using BufferStreamReader reader = new BufferStreamReader();
-            var (code, payload) = await reader.ReadQueryMessageAsync(stream);
-
-            PostgresProtocol.BackendMessageCode msgCode = (PostgresProtocol.BackendMessageCode)code;
-
-            switch (msgCode)
-            {
-                case PostgresProtocol.BackendMessageCode.RowDescription:
-                    //result.Columns = ParseRowDescription(payload);
-                    break;
-                case PostgresProtocol.BackendMessageCode.DataRow:
-                    var row = ParseDataRowMessage(payload);
-                    yield return row;
-                    break;
-                case PostgresProtocol.BackendMessageCode.CommandComplete:
-                    break;
-                case PostgresProtocol.BackendMessageCode.ErrorResponse:
-                    Console.WriteLine($"server error {Encoding.UTF8.GetString(payload)}");
-                    throw new Exception($"server error {Encoding.UTF8.GetString(payload)}");
-                case PostgresProtocol.BackendMessageCode.ReadyForQuery:
-                    yield break;
-                default:
-                    break;
-            }
-
+            buffer[0] = (byte)PostgresProtocol.FrontendMessageCode.Query;
+            Helper.WriteInt32BE(buffer.AsSpan(1, 4), payloadLen);
+            int written = Encoding.UTF8.GetBytes(query, buffer.AsSpan(5, queryByteCount));
+            buffer[5 + written] = 0;
+            stream.Write(buffer, 0, totalLen);
+        }
+        finally
+        {
+            System.Buffers.ArrayPool<byte>.Shared.Return(buffer);
         }
     }
 
-    public void SendQuery(NetworkStream stream, string query)
+    public static void SendTerminate(Stream stream)
     {
-        byte[] queryBytes = Encoding.UTF8.GetBytes(query);
-        int length = 4 + queryBytes.Length + 1;  // length + query + null terminator
-
-        using var ms = new MemoryStream();
-        ms.WriteByte((byte)PostgresProtocol.FrontendMessageCode.Query);
-        Helper.WriteInt32(ms, length);
-        ms.Write(queryBytes, 0, queryBytes.Length);
-        ms.WriteByte(0);
-
-        stream.Write(ms.ToArray());
-    }
-
-    private List<PgRow?> ParseRowDescription(byte[] payload)
-    {
-        List<PgRow?> rows = new List<PgRow?>();
-        var ms = new MemoryStream(payload);
-        var reader = new BinaryReader(ms, Encoding.UTF8);
-
-        short fieldCount = Helper.ReadInt16(reader);
-        for (int i = 0; i < fieldCount; i++)
-        {
-            string name = Helper.ReadCString(reader);
-            int tableOid = Helper.ReadInt32(reader);
-            short columnAttr = Helper.ReadInt16(reader);
-            int typeOid = Helper.ReadInt32(reader);
-            short typeSize = Helper.ReadInt16(reader);
-            int typeMod = Helper.ReadInt32(reader);
-            string format = Helper.ReadInt16(reader) == 0 ? "text" : "binary";
-
-            rows.Add(new PgRow()
-            {
-                Name = name,
-                TableOid = tableOid,
-                ColumnAttribute = columnAttr,
-                TypeOid = typeOid,
-                TypeSize = typeSize,
-                TypeModifier = typeMod,
-                FormatCode = format,
-            });
-
-        }
-        return rows;
-    }
-
-    private List<string?> ParseDataRowMessage(byte[] payload)
-    {
-        List<string?> row = new List<string>();
-        var ms = new MemoryStream(payload);
-        var reader = new BinaryReader(ms, Encoding.UTF8);
-
-        short fieldCount = Helper.ReadInt16(reader);
-        for (int i = 0; i < fieldCount; i++)
-        {
-            var len = Helper.ReadInt32(reader);
-            if (len == -1)
-            {
-                row.Add(null);
-            }
-            else
-            {
-                byte[] valBytes = reader.ReadBytes(len);
-                string val = Encoding.UTF8.GetString(valBytes);
-                row.Add(val);
-            }
-
-        }
-
-        return row;
-
+        Span<byte> buf = stackalloc byte[5];
+        buf[0] = (byte)PostgresProtocol.FrontendMessageCode.Terminate;
+        Helper.WriteInt32BE(buf.Slice(1, 4), 4);
+        stream.Write(buf);
     }
 }

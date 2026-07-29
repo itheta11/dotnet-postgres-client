@@ -1,56 +1,69 @@
-using System;
 using System.Buffers.Binary;
-using System.Net.Sockets;
 using System.Text;
 
 namespace PgClient.Utilities;
 
+/// Low-level big-endian binary helpers for the Postgres wire protocol.
 public static class Helper
 {
     public static void WriteCString(BinaryWriter writer, string value)
     {
-        byte[] bytes = System.Text.Encoding.UTF8.GetBytes(value);
-        writer.Write(bytes);
+        int max = Encoding.UTF8.GetMaxByteCount(value.Length);
+        if (max <= 512)
+        {
+            Span<byte> stack = stackalloc byte[max];
+            int written = Encoding.UTF8.GetBytes(value, stack);
+            writer.Write(stack.Slice(0, written));
+        }
+        else
+        {
+            byte[] rented = System.Buffers.ArrayPool<byte>.Shared.Rent(max);
+            try
+            {
+                int written = Encoding.UTF8.GetBytes(value, rented);
+                writer.Write(rented, 0, written);
+            }
+            finally
+            {
+                System.Buffers.ArrayPool<byte>.Shared.Return(rented);
+            }
+        }
         writer.Write((byte)0);
     }
 
-    public static void SkipMessage(NetworkStream stream, int length)
+    public static int ReadInt32BE(Stream s)
     {
-        byte[] buf = new byte[length];
-        stream.Read(buf, 0, length);
+        Span<byte> buf = stackalloc byte[4];
+        s.ReadExactly(buf);
+        return BinaryPrimitives.ReadInt32BigEndian(buf);
     }
 
-    public static int ReadInt32(Stream s)
+    public static int ReadInt32BE(BinaryReader r)
     {
-        byte[] buf = new byte[4];
-        s.Read(buf, 0, 4);
-        return (buf[0] << 24) | (buf[1] << 16) | (buf[2] << 8) | buf[3];
+        Span<byte> buf = stackalloc byte[4];
+        int read = r.Read(buf);
+        if (read < 4) throw new EndOfStreamException();
+        return BinaryPrimitives.ReadInt32BigEndian(buf);
     }
 
-    public static int ReadInt32(BinaryReader r)
+    public static short ReadInt16BE(BinaryReader r)
     {
-        var b = r.ReadBytes(4);
-        if (BitConverter.IsLittleEndian) Array.Reverse(b);
-        return BitConverter.ToInt32(b, 0);
+        Span<byte> buf = stackalloc byte[2];
+        int read = r.Read(buf);
+        if (read < 2) throw new EndOfStreamException();
+        return BinaryPrimitives.ReadInt16BigEndian(buf);
     }
 
-    public static short ReadInt16(BinaryReader r)
+    public static short ReadInt16BE(Stream s)
     {
-        var b = r.ReadBytes(2);
-        if (BitConverter.IsLittleEndian) Array.Reverse(b);
-        return BitConverter.ToInt16(b, 0);
-    }
-
-    public static short ReadInt16(Stream s)
-    {
-        byte[] buf = new byte[2];
-        s.Read(buf, 0, 2);
-        return (short)((buf[0] << 8) | buf[1]);
+        Span<byte> buf = stackalloc byte[2];
+        s.ReadExactly(buf);
+        return BinaryPrimitives.ReadInt16BigEndian(buf);
     }
 
     public static string ReadCString(Stream s)
     {
-        var sb = new System.Text.StringBuilder();
+        var sb = new StringBuilder();
         int b;
         while ((b = s.ReadByte()) > 0)
             sb.Append((char)b);
@@ -59,35 +72,39 @@ public static class Helper
 
     public static string ReadCString(BinaryReader r)
     {
-        var bytes = new List<byte>();
+        var sb = new StringBuilder();
         byte b;
         while ((b = r.ReadByte()) != 0)
-            bytes.Add(b);
-        return Encoding.UTF8.GetString(bytes.ToArray());
+            sb.Append((char)b);
+        return sb.ToString();
     }
 
+    /// Byte-swap for callers that want raw bit patterns.
     public static int ToBigEndian(int value)
-        => ((value & 0xFF) << 24) | ((value & 0xFF00) << 8)
-         | ((value >> 8) & 0xFF00) | ((value >> 24) & 0xFF);
+        => BinaryPrimitives.ReverseEndianness(value);
 
     public static void WriteInt32BE(BinaryWriter w, int value)
     {
-        Span<byte> span = stackalloc byte[4];
-        BinaryPrimitives.WriteInt32BigEndian(span, value);
-        w.Write(span.ToArray());
+        Span<byte> buf = stackalloc byte[4];
+        BinaryPrimitives.WriteInt32BigEndian(buf, value);
+        w.Write(buf);
     }
 
-    public static void WriteInt32(Stream s, int value)
+    public static void WriteInt32BE(Stream s, int value)
     {
-        var bytes = BitConverter.GetBytes(value);
-        if (BitConverter.IsLittleEndian) Array.Reverse(bytes);
-        s.Write(bytes, 0, 4);
+        Span<byte> buf = stackalloc byte[4];
+        BinaryPrimitives.WriteInt32BigEndian(buf, value);
+        s.Write(buf);
     }
 
-    public static void WriteInt32(Span<byte> s, int value)
-    {
-        var bytes = BitConverter.GetBytes(value);
-        if (BitConverter.IsLittleEndian) Array.Reverse(bytes);
-        bytes.CopyTo(s);
-    }
+    public static void WriteInt32BE(Span<byte> dest, int value)
+        => BinaryPrimitives.WriteInt32BigEndian(dest, value);
+
+    // Backwards-compatible aliases still used by existing call sites.
+    public static int ReadInt32(Stream s) => ReadInt32BE(s);
+    public static int ReadInt32(BinaryReader r) => ReadInt32BE(r);
+    public static short ReadInt16(Stream s) => ReadInt16BE(s);
+    public static short ReadInt16(BinaryReader r) => ReadInt16BE(r);
+    public static void WriteInt32(Stream s, int value) => WriteInt32BE(s, value);
+    public static void WriteInt32(Span<byte> s, int value) => WriteInt32BE(s, value);
 }

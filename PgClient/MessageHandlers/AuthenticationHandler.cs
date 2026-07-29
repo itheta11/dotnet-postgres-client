@@ -1,6 +1,4 @@
 using System.Net.Security;
-using System.Net.Sockets;
-using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
 using System.Text;
 using PgClient.BufferUtils;
@@ -30,10 +28,10 @@ public class AuthenticationHandler
     /// <param name="payload">payload excluding the intial code. i.e total length + rest of the bytes</param>
     /// <param name="stream">TCP network stream of the server</param>
     /// <exception cref="Exception"></exception>
-    public void Handler(byte[] payload, NetworkStream stream)
+    public void Handler(byte[] payload, Stream stream)
     {
         if (payload.Length < 4) throw new Exception("Authentication message too short.");
-        using BufferReader reader = new BufferReader();
+        var reader = new BufferReader();
         reader.SetBuffer(payload);
         int authType = reader.ReadInt32();
 
@@ -42,6 +40,16 @@ public class AuthenticationHandler
             case PostgresProtocol.AuthenticationCode.Ok:
                 //Console.WriteLine("Authentication successful");
                 break;
+
+            case PostgresProtocol.AuthenticationCode.CleartextPassword:
+                SendCleartextPassword(stream, _connectionParams.Password);
+                break;
+
+            case PostgresProtocol.AuthenticationCode.MD5Password:
+                var salt = reader.ReadBytes(4).ToArray();
+                SendMd5Password(stream, _connectionParams.Username, _connectionParams.Password, salt);
+                break;
+
             case PostgresProtocol.AuthenticationCode.SASL:
                 ///Client → SASLInitialResponse
                 string mechanism = reader.ReadCString().TrimEnd('\0');
@@ -77,7 +85,7 @@ public class AuthenticationHandler
     /// <param name="stream"></param>
     /// <param name="mechanism"></param>
     /// <param name="connectionParams"></param>
-    public void SendSASLIntial(NetworkStream stream, string mechanism, ConnectionParameters connectionParams)
+    public void SendSASLIntial(Stream stream, string mechanism, ConnectionParameters connectionParams)
     {
         string nonce = CreateClientNonce();
 
@@ -118,7 +126,7 @@ public class AuthenticationHandler
     /// </summary>
     /// <param name="stream"></param>
     /// <param name="firstServerMessage"></param>
-    public void AuthSASLContinue(NetworkStream stream, string firstServerMessage)
+    public void AuthSASLContinue(Stream stream, string firstServerMessage)
     {
         var (authMessage, saltedPasswordBytes) = ComputeSaltPassword(firstServerMessage);
         /// Client → SASLResponse
@@ -210,7 +218,7 @@ public class AuthenticationHandler
     /// ClientProof = XOR(ClientKey, ClientSignature)
     /// </summary>
     /// <returns></returns>
-    private void SendServerSaslResponse(NetworkStream stream, string authMessage, byte[] saltedPasswordBytes)
+    private void SendServerSaslResponse(Stream stream, string authMessage, byte[] saltedPasswordBytes)
     {
         byte[] clientKey = HmacSha256(saltedPasswordBytes, "Client Key");
         byte[] storedKey = ShaHash256(clientKey);
@@ -265,7 +273,7 @@ public class AuthenticationHandler
             {
                 int index = p.IndexOf("v=");
                 vPart = p.Substring(index + 2);
-            } 
+            }
         }
         if (vPart == null)
         {
@@ -292,6 +300,50 @@ public class AuthenticationHandler
         string nonce = Convert.ToBase64String(nonceBytes);
         _clientNonce = nonce;
         return nonce;
+    }
+
+    private static void SendCleartextPassword(Stream stream, string password)
+    {
+        byte[] payload = Encoding.UTF8.GetBytes(password);
+        SendPasswordFrame(stream, payload, appendNul: true);
+    }
+
+    /// PostgreSQL MD5: md5( md5(password + username) + salt ), prefixed with "md5".
+    private static void SendMd5Password(Stream stream, string user, string password, byte[] salt)
+    {
+        string inner = ToHexMd5(Encoding.UTF8.GetBytes(password + user));
+        byte[] innerBytes = Encoding.ASCII.GetBytes(inner);
+        byte[] withSalt = new byte[innerBytes.Length + salt.Length];
+        Buffer.BlockCopy(innerBytes, 0, withSalt, 0, innerBytes.Length);
+        Buffer.BlockCopy(salt, 0, withSalt, innerBytes.Length, salt.Length);
+        string outer = "md5" + ToHexMd5(withSalt);
+        byte[] payload = Encoding.ASCII.GetBytes(outer);
+        SendPasswordFrame(stream, payload, appendNul: true);
+    }
+
+    private static string ToHexMd5(byte[] input)
+    {
+        Span<byte> hash = stackalloc byte[16];
+        MD5.HashData(input, hash);
+        return Convert.ToHexStringLower(hash);
+    }
+
+    private static void SendPasswordFrame(Stream stream, byte[] payload, bool appendNul)
+    {
+        int total = 1 + 4 + payload.Length + (appendNul ? 1 : 0);
+        byte[] buf = System.Buffers.ArrayPool<byte>.Shared.Rent(total);
+        try
+        {
+            buf[0] = (byte)PostgresProtocol.FrontendMessageCode.PasswordMessage;
+            Helper.WriteInt32BE(buf.AsSpan(1, 4), total - 1);
+            Buffer.BlockCopy(payload, 0, buf, 5, payload.Length);
+            if (appendNul) buf[5 + payload.Length] = 0;
+            stream.Write(buf, 0, total);
+        }
+        finally
+        {
+            System.Buffers.ArrayPool<byte>.Shared.Return(buf);
+        }
     }
 
     private byte[] PBKDF2SHA256(string password, byte[] salt, int iterations)

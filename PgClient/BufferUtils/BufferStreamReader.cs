@@ -1,44 +1,37 @@
 using System.Buffers;
-using System.Text;
+using System.Buffers.Binary;
 
 namespace PgClient.BufferUtils;
 
-public class BufferStreamReader : IAsyncDisposable, IDisposable
+/// Reusable Postgres wire-message reader.
+///
+/// Owns a single pooled scratch buffer that grows as needed. Meant to be created
+/// once per <see cref="System.Net.Sockets.NetworkStream"/> and reused for the
+/// entire connection lifetime. Not thread-safe.
+public sealed class BufferStreamReader : IAsyncDisposable, IDisposable
 {
-    private readonly byte[] _headerBuffer = new byte[5]; // 1 for code + 4 for length
     private byte[] _payloadBuffer = Array.Empty<byte>();
     private bool _disposed;
 
-    public BufferStreamReader()
-    {
-    }
-
-    /// <summary>
-    /// Reads the next Postgres message (code + payload) asynchronously.
-    /// </summary>
-    public (byte Code, int totalLength, byte[] Payload) ReadMessage(Stream stream)
+    /// Reads a Postgres backend message (1-byte code + 4-byte length + payload).
+    /// Payload does NOT include the length prefix. Returned array is a fresh copy
+    /// owned by the caller.
+    public (byte Code, int TotalLength, byte[] Payload) ReadMessage(Stream stream)
     {
         EnsureNotDisposed();
 
-        // Read header (1 byte for code, 4 bytes for length)
-        ReadExact(stream, _headerBuffer, 0, 5);
+        Span<byte> header = stackalloc byte[5];
+        stream.ReadExactly(header);
 
-        byte code = _headerBuffer[0];
-        int length = ReadInt32(_headerBuffer, 1); // total length includes itself
-
-        // Subtract 4 since length includes the length field itself
+        byte code = header[0];
+        int length = BinaryPrimitives.ReadInt32BigEndian(header.Slice(1, 4));
         int payloadLength = length - 4;
-
         if (payloadLength < 0)
             throw new InvalidDataException($"Invalid message length: {length}");
 
-        // Rent or reuse payload buffer
-        if (_payloadBuffer.Length < payloadLength)
-            _payloadBuffer = ArrayPool<byte>.Shared.Rent(payloadLength);
+        EnsurePayloadCapacity(payloadLength);
+        stream.ReadExactly(_payloadBuffer, 0, payloadLength);
 
-        ReadExact(stream, _payloadBuffer, 0, payloadLength);
-
-        // Copy into exact-sized array before returning
         var result = new byte[payloadLength];
         Buffer.BlockCopy(_payloadBuffer, 0, result, 0, payloadLength);
         return (code, length, result);
@@ -46,76 +39,70 @@ public class BufferStreamReader : IAsyncDisposable, IDisposable
 
     public (byte Code, byte[] Payload) ReadQueryMessage(Stream stream)
     {
-        int type = stream.ReadByte();
-        if (type == -1)
-            throw new IOException("Unexpected end of stream");
-        byte[] lengthBuffer = new byte[4];
-        stream.ReadExactly(lengthBuffer, 0, 4);
-        // Big-endian
-        int length = ReadInt32(lengthBuffer, 0);
-
-        var payload = new byte[length - 4];
-        stream.ReadExactly(payload, 0, payload.Length);
-
-        return ((byte)type, payload);
+        var (code, _, payload) = ReadMessage(stream);
+        return (code, payload);
     }
 
-    public async Task<(byte Code, byte[] Payload)> ReadQueryMessageAsync(Stream stream)
+    public async ValueTask<(byte Code, byte[] Payload)> ReadQueryMessageAsync(Stream stream, CancellationToken ct = default)
     {
-        byte[] typeBuffer = new byte[1];
-        await stream.ReadExactlyAsync(typeBuffer, 0, 1).ConfigureAwait(false);
-        int type = typeBuffer[0];
-        if (type == -1)
-            throw new IOException("Unexpected end of stream");
+        EnsureNotDisposed();
 
-        byte[] lengthBuffer = new byte[4];
-        await stream.ReadExactlyAsync(lengthBuffer, 0, 4).ConfigureAwait(false);
-        int length = ReadInt32(lengthBuffer, 0); // Big-endian
-
-        var payload = new byte[length - 4];
-        await stream.ReadExactlyAsync(payload, 0, payload.Length).ConfigureAwait(false);
-
-        return ((byte)type, payload);
-    }
-
-    private static int ReadInt32(byte[] buffer, int offset)
-    {
-        // Postgres uses big-endian order
-        return (buffer[offset] << 24) |
-               (buffer[offset + 1] << 16) |
-               (buffer[offset + 2] << 8) |
-               buffer[offset + 3];
-    }
-
-    private void ReadExact(Stream stream, byte[] buffer, int offset, int count)
-    {
-        int readTotal = 0;
-        while (readTotal < count)
+        byte[] header = ArrayPool<byte>.Shared.Rent(5);
+        int length;
+        byte code;
+        try
         {
-            int read = stream.Read(buffer, offset + readTotal, count - readTotal);
-            if (read == 0)
-                throw new EndOfStreamException("Stream ended before all bytes could be read.");
-            readTotal += read;
+            await stream.ReadExactlyAsync(header.AsMemory(0, 5), ct).ConfigureAwait(false);
+            code = header[0];
+            length = BinaryPrimitives.ReadInt32BigEndian(header.AsSpan(1, 4));
         }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(header);
+        }
+
+        int payloadLength = length - 4;
+        if (payloadLength < 0)
+            throw new InvalidDataException($"Invalid message length: {length}");
+
+        EnsurePayloadCapacity(payloadLength);
+        await stream.ReadExactlyAsync(_payloadBuffer.AsMemory(0, payloadLength), ct).ConfigureAwait(false);
+
+        var result = new byte[payloadLength];
+        Buffer.BlockCopy(_payloadBuffer, 0, result, 0, payloadLength);
+        return (code, result);
+    }
+
+    private void EnsurePayloadCapacity(int payloadLength)
+    {
+        if (_payloadBuffer.Length >= payloadLength) return;
+
+        if (_payloadBuffer.Length > 0)
+            ArrayPool<byte>.Shared.Return(_payloadBuffer, clearArray: false);
+
+        _payloadBuffer = ArrayPool<byte>.Shared.Rent(payloadLength);
     }
 
     private void EnsureNotDisposed()
     {
-        if (_disposed)
-            throw new ObjectDisposedException(nameof(BufferStreamReader));
+        if (_disposed) throw new ObjectDisposedException(nameof(BufferStreamReader));
     }
 
     public void Dispose()
     {
-        DisposeAsync().AsTask().GetAwaiter().GetResult();
+        if (_disposed) return;
+        _disposed = true;
+        if (_payloadBuffer.Length > 0)
+        {
+            ArrayPool<byte>.Shared.Return(_payloadBuffer, clearArray: false);
+            _payloadBuffer = Array.Empty<byte>();
+        }
         GC.SuppressFinalize(this);
     }
 
-    public async ValueTask DisposeAsync()
+    public ValueTask DisposeAsync()
     {
-        if (_disposed) return;
-
-        _disposed = true;
-        ArrayPool<byte>.Shared.Return(_payloadBuffer, clearArray: true);
+        Dispose();
+        return ValueTask.CompletedTask;
     }
 }

@@ -1,57 +1,60 @@
-using System.Net.Sockets;
-using System.Text;
-using System.Threading.Tasks;
 using PgClient.MessageHandlers;
 using PgClient.BufferUtils;
 using PgClient.Protocol;
-using System.Data;
+using PgClient.Response;
 
 namespace PgClient.MessageController;
 
-public class MessageController
+public sealed class PgMessageController
 {
-    private AuthenticationHandler authenticationHandler;
+    private readonly AuthenticationHandler _authenticationHandler;
+    private int _pid;
+    private int _secretKey;
 
-    private int _Pid;
-    private int _SecretKey;
-    public MessageController(ConnectionParameters connectionParameters)
+    public PgMessageController(ConnectionParameters connectionParameters)
     {
-        authenticationHandler = new AuthenticationHandler(connectionParameters);
+        _authenticationHandler = new AuthenticationHandler(connectionParameters);
     }
 
-    public (PgConnectionState state, int PId, int SecretKeyId) HandleBackendMessages(NetworkStream stream)
+    /// Runs the startup + authentication loop synchronously, using a caller-owned
+    /// reader that is reused for the entire connection lifetime.
+    public (PgConnectionState State, int Pid, int SecretKeyId, PostgresProtocol.TransactionStatus TxStatus)
+        HandleBackendMessages(Stream stream, BufferStreamReader reader)
     {
         while (true)
         {
-            using BufferStreamReader reader = new BufferStreamReader();
-            var (code, length, payload) = reader.ReadMessage(stream);
+            var (code, _, payload) = reader.ReadMessage(stream);
+            var msgCode = (PostgresProtocol.BackendMessageCode)code;
 
-            PostgresProtocol.BackendMessageCode msgCode = (PostgresProtocol.BackendMessageCode)code;
             switch (msgCode)
             {
                 case PostgresProtocol.BackendMessageCode.Authentication:
-                    authenticationHandler.Handler(payload, stream);
+                    _authenticationHandler.Handler(payload, stream);
                     break;
 
                 case PostgresProtocol.BackendMessageCode.ParameterStatus:
-                    ////Console.WriteLine($"Parameter {Encoding.UTF8.GetString(payload)}");
                     break;
 
                 case PostgresProtocol.BackendMessageCode.BackendKeyData:
-                    ////Console.WriteLine($"Backend keyed data {Encoding.UTF8.GetString(payload)}");
-                    BackendKeyHandler backendKeyHandler = new BackendKeyHandler();
-                    (_Pid, _SecretKey) = backendKeyHandler.HandleBankendKey(payload);
+                    var backendKeyHandler = new BackendKeyHandler();
+                    (_pid, _secretKey) = backendKeyHandler.HandleBankendKey(payload);
                     break;
-                case PostgresProtocol.BackendMessageCode.ReadyForQuery:
-                    ////Console.WriteLine($"Ready for query {Encoding.UTF8.GetString(payload)}");
-                    return (PgConnectionState.Ready, _Pid, _SecretKey);
+
+                case PostgresProtocol.BackendMessageCode.NoticeResponse:
+                    break;
+
                 case PostgresProtocol.BackendMessageCode.ErrorResponse:
-                    ////Console.WriteLine($"server error {Encoding.UTF8.GetString(payload)}");
-                    throw new Exception($"server error {Encoding.UTF8.GetString(payload)}");
+                    throw new PgException(PgErrorInfo.Parse(payload));
+
+                case PostgresProtocol.BackendMessageCode.ReadyForQuery:
+                    var tx = payload.Length >= 1
+                        ? (PostgresProtocol.TransactionStatus)payload[0]
+                        : PostgresProtocol.TransactionStatus.Idle;
+                    return (PgConnectionState.Ready, _pid, _secretKey, tx);
+
                 default:
                     break;
             }
-
         }
     }
 }
