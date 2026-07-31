@@ -1,51 +1,35 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <OutputType>Exe</OutputType>
-    <TargetFramework>net9.0</TargetFramework>
-    <ImplicitUsings>enable</ImplicitUsings>
-    <Nullable>enable</Nullable>
-    <LangVersion>latest</LangVersion>
+    <TargetFrameworks>net8.0;net9.0</TargetFrameworks>
     <RootNamespace>PgClient</RootNamespace>
     <AssemblyName>PgClient</AssemblyName>
-    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <IsPackable>true</IsPackable>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
   </PropertyGroup>
 
-  <!-- NuGet packaging metadata (used when producing a library package) -->
+  <!-- NuGet packaging metadata -->
   <PropertyGroup>
     <PackageId>PgClient</PackageId>
     <Version>0.1.0-preview</Version>
-    <Authors>Anup</Authors>
-    <Description>A lightweight, allocation-conscious PostgreSQL client written from scratch on the raw wire protocol.</Description>
-    <PackageTags>postgres;postgresql;database;ado;client</PackageTags>
-    <PackageLicenseExpression>MIT</PackageLicenseExpression>
-    <RepositoryType>git</RepositoryType>
-    <GenerateDocumentationFile>false</GenerateDocumentationFile>
-    <IsPackable>true</IsPackable>
+    <Description>A lightweight, allocation-conscious PostgreSQL client written from scratch on the raw wire protocol. Zero third-party runtime dependencies.</Description>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
 
-    <!-- Symbols + SourceLink for debug-friendly NuGet packages -->
     <IncludeSymbols>true</IncludeSymbols>
     <SymbolPackageFormat>snupkg</SymbolPackageFormat>
     <PublishRepositoryUrl>true</PublishRepositoryUrl>
     <EmbedUntrackedSources>true</EmbedUntrackedSources>
     <DebugType>portable</DebugType>
     <DebugSymbols>true</DebugSymbols>
-    <ContinuousIntegrationBuild Condition="'$(GITHUB_ACTIONS)' == 'true'">true</ContinuousIntegrationBuild>
-    <Deterministic>true</Deterministic>
   </PropertyGroup>
 
-  <!-- Legacy / scratch files retained for reference but excluded from build -->
   <ItemGroup>
-    <Compile Remove="Test.cs" />
-    <Compile Remove="TestWorkingClient.cs" />
-    <Compile Remove="Benchmark/**/*.cs" />
-    <None Include="Test.cs" />
-    <None Include="TestWorkingClient.cs" />
-    <None Include="Benchmark/**/*.cs" />
+    <None Include="..\README.md" Pack="true" PackagePath="\" />
+    <None Include="..\LICENSE" Pack="true" PackagePath="\" Condition="Exists('..\LICENSE')" />
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="BenchmarkDotNet" Version="0.15.4" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="8.0.2" />
     <PackageReference Include="Microsoft.SourceLink.GitHub" Version="8.0.0" PrivateAssets="All" />
   </ItemGroup>
 

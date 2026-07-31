@@ -15,6 +15,7 @@ public sealed class PgDbConnection : DbConnection
     public PgDbConnection() { }
     public PgDbConnection(string connectionString) { ConnectionString = connectionString; }
 
+    [System.Diagnostics.CodeAnalysis.AllowNull]
     public override string ConnectionString
     {
         get => _connectionString;
@@ -29,7 +30,7 @@ public sealed class PgDbConnection : DbConnection
 
     public override string Database => _parsed?.Database ?? string.Empty;
     public override string DataSource => _parsed?.Hostname ?? string.Empty;
-    public override string ServerVersion => string.Empty;
+    public override string ServerVersion => _native?.ServerVersion ?? string.Empty;
     public override ConnectionState State => _state;
 
     /// The underlying driver-native connection. Null until <see cref="OpenAsync(CancellationToken)"/> completes.
@@ -41,11 +42,12 @@ public sealed class PgDbConnection : DbConnection
     public override void Close()
     {
         if (_state == ConnectionState.Closed) return;
+        var prev = _state;
         _native?.Close();
         _native?.Dispose();
         _native = null;
         _state = ConnectionState.Closed;
-        OnStateChange(new StateChangeEventArgs(ConnectionState.Open, ConnectionState.Closed));
+        OnStateChange(new StateChangeEventArgs(prev, ConnectionState.Closed));
     }
 
     public override void Open() => OpenAsync(CancellationToken.None).GetAwaiter().GetResult();

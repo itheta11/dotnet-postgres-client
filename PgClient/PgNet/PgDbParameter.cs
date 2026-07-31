@@ -15,11 +15,13 @@ public sealed class PgDbParameter : DbParameter
     public override DbType DbType { get; set; } = DbType.Object;
     public override ParameterDirection Direction { get; set; } = ParameterDirection.Input;
     public override bool IsNullable { get; set; }
+    [System.Diagnostics.CodeAnalysis.AllowNull]
     public override string ParameterName
     {
         get => _parameterName;
         set => _parameterName = value ?? string.Empty;
     }
+    [System.Diagnostics.CodeAnalysis.AllowNull]
     public override string SourceColumn { get; set; } = string.Empty;
     public override object? Value
     {

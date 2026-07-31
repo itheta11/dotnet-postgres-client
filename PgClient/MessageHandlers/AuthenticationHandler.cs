@@ -15,7 +15,7 @@ public class AuthenticationHandler
     private string _clientFirstMessagebare = "";
     private string _clientNonce = "";
     private string _serverNonce = "";
-    private byte[] _saltedPassword;
+    private byte[] _saltedPassword = Array.Empty<byte>();
     private string _authMessage = "";
     public AuthenticationHandler(ConnectionParameters connectionParameters)
     {
@@ -166,8 +166,8 @@ public class AuthenticationHandler
     private (string authMessage, byte[] saltedPasswordBytes) ComputeSaltPassword(string firstServerMessage)
     {
         // parse serverFirst: "r=<nonce>,s=<salt>,i=<iterations>"
-        string serverNonce = null;
-        string saltB64 = null;
+        string? serverNonce = null;
+        string? saltB64 = null;
         int iterations = 0;
         var parts = firstServerMessage.Split(',');
         foreach (var p in parts)
@@ -265,7 +265,7 @@ public class AuthenticationHandler
         if (serverFinal.StartsWith("e="))
             throw new Exception("SCRAM error from server: " + serverFinal);
 
-        string vPart = null;
+        string? vPart = null;
         var parts = serverFinal.Split(',');
         foreach (var p in parts)
         {
@@ -325,7 +325,11 @@ public class AuthenticationHandler
     {
         Span<byte> hash = stackalloc byte[16];
         MD5.HashData(input, hash);
+#if NET9_0_OR_GREATER
         return Convert.ToHexStringLower(hash);
+#else
+        return PgClient.Utilities.HexPolyfill.ToHexStringLower(hash);
+#endif
     }
 
     private static void SendPasswordFrame(Stream stream, byte[] payload, bool appendNul)

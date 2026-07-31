@@ -230,7 +230,11 @@ public sealed class ByteaHandler : PgTypeHandler
     public override byte[] EncodeText(object value)
     {
         var raw = (byte[])value;
+#if NET9_0_OR_GREATER
         return Encoding.ASCII.GetBytes("\\x" + Convert.ToHexStringLower(raw));
+#else
+        return Encoding.ASCII.GetBytes("\\x" + PgClient.Utilities.HexPolyfill.ToHexStringLower(raw));
+#endif
     }
 
     public override byte[] EncodeBinary(object value) => (byte[])value;

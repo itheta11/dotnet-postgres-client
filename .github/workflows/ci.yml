@@ -13,12 +13,62 @@ env:
 
 jobs:
   build:
-    name: Build & Test
+    name: Build & Unit Tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            8.0.x
+            9.0.x
+
+      - name: Restore
+        run: dotnet restore PgClient.sln
+
+      - name: Format check
+        if: matrix.os == 'ubuntu-latest'
+        run: dotnet format PgClient.sln --verify-no-changes --no-restore --severity error
+
+      - name: Build (Release)
+        run: dotnet build PgClient.sln --no-restore --configuration Release
+
+      - name: Unit tests
+        run: dotnet test tests/PgClient.Tests/PgClient.Tests.csproj --no-build --configuration Release --collect:"XPlat Code Coverage" --logger "trx;LogFileName=unit.trx"
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-${{ matrix.os }}
+          path: |
+            **/TestResults/**/*.trx
+            **/TestResults/**/coverage.cobertura.xml
+
+      - name: Upload coverage to Codecov
+        if: matrix.os == 'ubuntu-latest'
+        uses: codecov/codecov-action@v4
+        with:
+          files: "**/TestResults/**/coverage.cobertura.xml"
+          fail_ci_if_error: false
+
+  integration:
+    name: Integration Tests (Postgres ${{ matrix.postgres }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        postgres: [13, 14, 15, 16, 17]
 
     services:
       postgres:
-        image: postgres:16
+        image: postgres:${{ matrix.postgres }}
         env:
           POSTGRES_USER: pgclient
           POSTGRES_PASSWORD: pgclient
@@ -41,23 +91,32 @@ jobs:
       - name: Restore
         run: dotnet restore PgClient.sln
 
-      - name: Build
-        run: dotnet build PgClient.sln --no-restore --configuration Release
-
-      - name: Unit tests
-        run: dotnet test tests/PgClient.Tests/PgClient.Tests.csproj --no-build --configuration Release --logger "trx;LogFileName=unit.trx"
+      - name: Build tests
+        run: dotnet build tests/PgClient.Tests/PgClient.Tests.csproj --no-restore --configuration Release
 
       - name: Integration tests
         env:
           PGCLIENT_TEST_CONN: "localhost;5432;pgclient;pgclient;pgclient"
-        run: dotnet test tests/PgClient.Tests/PgClient.Tests.csproj --no-build --configuration Release --filter "FullyQualifiedName~Integration"
+        run: dotnet test tests/PgClient.Tests/PgClient.Tests.csproj --no-build --configuration Release --filter "FullyQualifiedName~Integration" --logger "trx;LogFileName=integration-pg${{ matrix.postgres }}.trx"
+
+  pack:
+    name: Pack NuGet
+    needs: [build, integration]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            8.0.x
+            9.0.x
 
       - name: Pack
-        if: startsWith(github.ref, 'refs/tags/v')
-        run: dotnet pack PgClient/PgClient.csproj --no-build --configuration Release --output artifacts
+        run: dotnet pack PgClient/PgClient.csproj --configuration Release --output artifacts
 
       - name: Upload package artifacts
-        if: startsWith(github.ref, 'refs/tags/v')
         uses: actions/upload-artifact@v4
         with:
           name: nuget-packages
@@ -65,7 +124,7 @@ jobs:
 
   publish:
     name: Publish to NuGet
-    needs: build
+    needs: pack
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:

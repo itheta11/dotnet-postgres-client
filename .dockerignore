@@ -1,0 +1,32 @@
+# Build outputs & IDE artefacts
+**/bin/
+**/obj/
+**/BenchmarkDotNet.Artifacts/
+**/TestResults/
+**/.vs/
+**/.idea/
+**/*.user
+
+# Source control & CI
+.git/
+.github/
+.gitignore
+.gitattributes
+
+# Editor / OS junk
+.DS_Store
+.vscode/
+.devcontainer/
+
+# Docker + docs that don't affect the build image
+Dockerfile
+docker-compose*.yml
+.dockerignore
+CHANGELOG.md
+CONTRIBUTING.md
+SECURITY.md
+LICENSE
+README.md
+
+# Local database dumps used only for manual testing
+db/

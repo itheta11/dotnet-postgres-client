@@ -1,7 +1,9 @@
 using System.Net.Sockets;
 using System.Text;
+using Microsoft.Extensions.Logging;
 using PgClient;
 using PgClient.BufferUtils;
+using PgClient.Diagnostics;
 using PgClient.MessageController;
 using PgClient.Pool;
 using PgClient.Protocol;
@@ -11,6 +13,8 @@ using PgClient.Response;
 using PgClient.Ssl;
 using PgClient.Types;
 using PgClient.Utilities;
+
+namespace PgClient;
 
 /// A single Postgres backend connection.
 ///
@@ -27,6 +31,8 @@ public sealed class PgConnection : IAsyncDisposable, IDisposable
     private readonly ConnectionParameters _connectionParams;
     private readonly SemaphoreSlim _stateLock = new(1, 1);
     private readonly PreparedStatementCache _prepared;
+    private readonly ILogger _logger;
+    private readonly Dictionary<string, string> _parameterStatus = new(StringComparer.OrdinalIgnoreCase);
 
     public PgConnectionState State { get; private set; } = PgConnectionState.Disconnected;
     public PostgresProtocol.TransactionStatus TransactionStatus { get; private set; }
@@ -40,6 +46,12 @@ public sealed class PgConnection : IAsyncDisposable, IDisposable
 
     /// UTC timestamp of when the underlying socket was opened.
     public DateTime OpenedAtUtc { get; private set; }
+
+    /// <summary>Value of the server's <c>server_version</c> <c>ParameterStatus</c>, e.g. "16.3".</summary>
+    public string ServerVersion => _parameterStatus.TryGetValue("server_version", out var v) ? v : string.Empty;
+
+    /// <summary>Read-only view of the last known server parameter statuses.</summary>
+    public IReadOnlyDictionary<string, string> ParameterStatus => _parameterStatus;
 
     /// The pool owning this connection, if any. Set by <see cref="PgConnectionPool"/>.
     internal PgConnectionPool? Pool { get; set; }
@@ -64,6 +76,7 @@ public sealed class PgConnection : IAsyncDisposable, IDisposable
         _prepared = new PreparedStatementCache(
             connectionParams.MaxAutoPrepare,
             connectionParams.AutoPrepareMinUsages);
+        _logger = connectionParams.GetLogger("PgClient.PgConnection");
     }
 
     // ── Lifecycle ───────────────────────────────────────────────────────────
@@ -78,6 +91,7 @@ public sealed class PgConnection : IAsyncDisposable, IDisposable
 
             State = PgConnectionState.Connecting;
             _tcpClient = new TcpClient { NoDelay = true };
+            ConfigureKeepAlive(_tcpClient);
 
             using (var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken))
             {
@@ -107,11 +121,16 @@ public sealed class PgConnection : IAsyncDisposable, IDisposable
             SendStartupMessage(BuildStartupOptions());
 
             var controller = new PgMessageController(_connectionParams);
-            var (state, pid, secret, tx) = controller.HandleBackendMessages(_stream, _protocolReader);
+            var (state, pid, secret, tx) = controller.HandleBackendMessages(
+                _stream, _protocolReader,
+                onParameterStatus: (name, value) => _parameterStatus[name] = value);
             State = state;
             ProcessId = pid;
             SecretKey = secret;
             TransactionStatus = tx;
+            PgClientMetrics.ConnectionsOpened.Add(1);
+            _logger.LogInformation("PgClient connected to {Host}:{Port} as {User}/{Db} (server_version={ServerVersion}, tls={IsSecure})",
+                _connectionParams.Hostname, _connectionParams.Port, _connectionParams.Username, _connectionParams.Database, ServerVersion, IsSecure);
         }
         catch
         {
@@ -131,7 +150,9 @@ public sealed class PgConnection : IAsyncDisposable, IDisposable
         ThrowIfDisposed();
         EnsureReady();
 
-        await _stateLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        using var linked = CreateCommandCts(cancellationToken);
+        await _stateLock.WaitAsync(linked.Token).ConfigureAwait(false);
+        var start = System.Diagnostics.Stopwatch.GetTimestamp();
         try
         {
             var controller = new PgQueryController();
@@ -142,15 +163,18 @@ public sealed class PgConnection : IAsyncDisposable, IDisposable
                 onReadyForQuery: tx => TransactionStatus = tx,
                 onNotice: n => Notice?.Invoke(n),
                 onNotification: RaiseNotification);
+            PgClientMetrics.CommandsExecuted.Add(1);
             return reader;
         }
         catch
         {
+            PgClientMetrics.CommandsFailed.Add(1);
             State = PgConnectionState.Faulted;
             throw;
         }
         finally
         {
+            PgClientMetrics.CommandDurationMs.Record(GetElapsedMs(start));
             _stateLock.Release();
         }
     }
@@ -188,7 +212,9 @@ public sealed class PgConnection : IAsyncDisposable, IDisposable
         EnsureReady();
         ArgumentNullException.ThrowIfNull(parameters);
 
-        await _stateLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        using var linked = CreateCommandCts(cancellationToken);
+        await _stateLock.WaitAsync(linked.Token).ConfigureAwait(false);
+        var start = System.Diagnostics.Stopwatch.GetTimestamp();
         try
         {
             string? cachedName = _prepared.TryGetOrPromote(sql, out string? evicted);
@@ -210,15 +236,18 @@ public sealed class PgConnection : IAsyncDisposable, IDisposable
                 onReadyForQuery: tx => TransactionStatus = tx,
                 onNotice: n => Notice?.Invoke(n),
                 onNotification: RaiseNotification);
+            PgClientMetrics.CommandsExecuted.Add(1);
             return reader;
         }
         catch
         {
+            PgClientMetrics.CommandsFailed.Add(1);
             State = PgConnectionState.Faulted;
             throw;
         }
         finally
         {
+            PgClientMetrics.CommandDurationMs.Record(GetElapsedMs(start));
             _stateLock.Release();
         }
     }
@@ -382,6 +411,11 @@ public sealed class PgConnection : IAsyncDisposable, IDisposable
     /// Resets session state and readies the connection for the next borrower.
     internal void MarkIdle()
     {
+        if (_connectionParams.NoResetOnClose)
+        {
+            _prepared.Drain().ToList();
+            return;
+        }
         try
         {
             PgQueryController.SendQuery(_stream!, "DISCARD ALL");
@@ -423,7 +457,9 @@ public sealed class PgConnection : IAsyncDisposable, IDisposable
             _protocolReader?.Dispose();
             _stream?.Dispose();
             _tcpClient?.Close();
+            var wasClosed = State == PgConnectionState.Closed;
             State = PgConnectionState.Closed;
+            if (!wasClosed) PgClientMetrics.ConnectionsClosed.Add(1);
         }
     }
 
@@ -496,6 +532,42 @@ public sealed class PgConnection : IAsyncDisposable, IDisposable
     private void ThrowIfDisposed()
     {
         if (_disposed) throw new ObjectDisposedException(nameof(PgConnection));
+    }
+
+    private CancellationTokenSource CreateCommandCts(CancellationToken cancellationToken)
+    {
+        var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        if (_connectionParams.CommandTimeout > TimeSpan.Zero)
+            cts.CancelAfter(_connectionParams.CommandTimeout);
+        return cts;
+    }
+
+    private static double GetElapsedMs(long startTicks)
+    {
+        long delta = System.Diagnostics.Stopwatch.GetTimestamp() - startTicks;
+        return delta * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
+    }
+
+    private void ConfigureKeepAlive(TcpClient client)
+    {
+        if (!_connectionParams.TcpKeepAlive) return;
+        var socket = client.Client;
+        try
+        {
+            socket.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.KeepAlive, true);
+            int time = Math.Max(1, (int)_connectionParams.TcpKeepAliveTime.TotalSeconds);
+            int interval = Math.Max(1, (int)_connectionParams.TcpKeepAliveInterval.TotalSeconds);
+            socket.SetSocketOption(SocketOptionLevel.Tcp, SocketOptionName.TcpKeepAliveTime, time);
+            socket.SetSocketOption(SocketOptionLevel.Tcp, SocketOptionName.TcpKeepAliveInterval, interval);
+            socket.SetSocketOption(SocketOptionLevel.Tcp, SocketOptionName.TcpKeepAliveRetryCount, 5);
+        }
+        catch (SocketException)
+        {
+            // Some platforms do not support fine-grained keepalive controls; silently continue.
+        }
+        catch (NotSupportedException)
+        {
+        }
     }
 
     public void Dispose()

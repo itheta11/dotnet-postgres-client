@@ -19,7 +19,7 @@ public sealed class PgMessageController
     /// Runs the startup + authentication loop synchronously, using a caller-owned
     /// reader that is reused for the entire connection lifetime.
     public (PgConnectionState State, int Pid, int SecretKeyId, PostgresProtocol.TransactionStatus TxStatus)
-        HandleBackendMessages(Stream stream, BufferStreamReader reader)
+        HandleBackendMessages(Stream stream, BufferStreamReader reader, Action<string, string>? onParameterStatus = null)
     {
         while (true)
         {
@@ -33,6 +33,11 @@ public sealed class PgMessageController
                     break;
 
                 case PostgresProtocol.BackendMessageCode.ParameterStatus:
+                    if (onParameterStatus is not null)
+                    {
+                        var (name, value) = ParseParameterStatus(payload);
+                        onParameterStatus(name, value);
+                    }
                     break;
 
                 case PostgresProtocol.BackendMessageCode.BackendKeyData:
@@ -56,5 +61,19 @@ public sealed class PgMessageController
                     break;
             }
         }
+    }
+
+    private static (string Name, string Value) ParseParameterStatus(byte[] payload)
+    {
+        var span = payload.AsSpan();
+        int nul = span.IndexOf((byte)0);
+        if (nul < 0) return (string.Empty, string.Empty);
+        string name = System.Text.Encoding.UTF8.GetString(span[..nul]);
+        var rest = span[(nul + 1)..];
+        int nul2 = rest.IndexOf((byte)0);
+        string value = nul2 < 0
+            ? System.Text.Encoding.UTF8.GetString(rest)
+            : System.Text.Encoding.UTF8.GetString(rest[..nul2]);
+        return (name, value);
     }
 }

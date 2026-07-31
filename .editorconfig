@@ -1,0 +1,56 @@
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+indent_style = space
+trim_trailing_whitespace = true
+
+[*.{cs,csx}]
+indent_size = 4
+max_line_length = 120
+
+# C# preferences ------------------------------------------------------------
+
+csharp_new_line_before_open_brace = all
+csharp_new_line_before_else = true
+csharp_new_line_before_catch = true
+csharp_new_line_before_finally = true
+csharp_prefer_braces = true:suggestion
+csharp_style_namespace_declarations = file_scoped:suggestion
+csharp_style_var_for_built_in_types = true:suggestion
+csharp_style_var_when_type_is_apparent = true:suggestion
+csharp_style_expression_bodied_methods = when_on_single_line:suggestion
+csharp_style_prefer_readonly_struct = true:suggestion
+csharp_using_directive_placement = outside_namespace:suggestion
+
+# Analyzer noise reduction for a low-level protocol library ------------------
+
+# CA1032: Implement standard exception constructors — PgException wraps ErrorResponse.
+dotnet_diagnostic.CA1032.severity = none
+# CA1305: culture info — we use InvariantCulture explicitly on hot paths.
+dotnet_diagnostic.CA1305.severity = suggestion
+# CA1707: Identifiers should not contain underscores — Pg_* names for spec fidelity.
+dotnet_diagnostic.CA1707.severity = none
+# CA1848: Use LoggerMessage source generators — noise for a low-log library.
+dotnet_diagnostic.CA1848.severity = none
+# CA2007: ConfigureAwait — library uses it consistently; suppress false positives in tests.
+dotnet_diagnostic.CA2007.severity = suggestion
+# CA1852: Seal internal types — often intentionally left open for testability.
+dotnet_diagnostic.CA1852.severity = suggestion
+# IDE0058: value never used — noisy on protocol writers.
+dotnet_diagnostic.IDE0058.severity = none
+
+# Test project ---------------------------------------------------------------
+
+[tests/**/*.cs]
+dotnet_diagnostic.CA1707.severity = none
+dotnet_diagnostic.CA1861.severity = none
+dotnet_diagnostic.CA2007.severity = none
+
+[*.{csproj,props,targets}]
+indent_size = 2
+
+[*.{yml,yaml,json,md}]
+indent_size = 2

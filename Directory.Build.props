@@ -1,0 +1,33 @@
+<Project>
+
+  <PropertyGroup>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <AnalysisLevel>latest-recommended</AnalysisLevel>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <!--
+      Correctness warnings are errors in Release. Style/CA warnings are
+      surfaced but do not fail the build; they are tracked and cleaned
+      incrementally.
+    -->
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <WarningsAsErrors Condition="'$(Configuration)' == 'Release'">$(WarningsAsErrors);nullable;CS8600;CS8601;CS8602;CS8603;CS8604;CS8618;CS8625;CS0168;CS0219;CS0414</WarningsAsErrors>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+    <Deterministic>true</Deterministic>
+    <ContinuousIntegrationBuild Condition="'$(GITHUB_ACTIONS)' == 'true'">true</ContinuousIntegrationBuild>
+  </PropertyGroup>
+
+  <!-- Common package metadata -->
+  <PropertyGroup>
+    <Authors>Anup</Authors>
+    <Company>PgClient</Company>
+    <Copyright>Copyright (c) $([System.DateTime]::UtcNow.Year) Anup</Copyright>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/anup/postgres-client</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/anup/postgres-client.git</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageTags>postgres;postgresql;database;ado;client;ado.net;pg;sql</PackageTags>
+  </PropertyGroup>
+
+</Project>

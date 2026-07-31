@@ -1,0 +1,65 @@
+# docker-compose for local development, sample runs, and benchmarks.
+#
+#   Start Postgres + the sample:
+#     docker compose up --build sample
+#
+#   Run the benchmarks (attached, prints results to stdout):
+#     docker compose --profile benchmarks run --rm benchmarks
+#
+#   Run only Postgres for local `dotnet run`:
+#     docker compose up -d postgres
+#
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: pgclient-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: pgclient
+      POSTGRES_PASSWORD: pgclient
+      POSTGRES_DB: pgclient
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgclient-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pgclient -d pgclient"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  sample:
+    build:
+      context: .
+      target: sample
+    image: pgclient/sample:latest
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGHOST: postgres
+      PGPORT: "5432"
+      PGUSER: pgclient
+      PGPASSWORD: pgclient
+      PGDATABASE: pgclient
+
+  benchmarks:
+    build:
+      context: .
+      target: benchmarks
+    image: pgclient/benchmarks:latest
+    profiles: ["benchmarks"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGHOST: postgres
+      PGPORT: "5432"
+      PGUSER: pgclient
+      PGPASSWORD: pgclient
+      PGDATABASE: pgclient
+    volumes:
+      - ./BenchmarkDotNet.Artifacts:/src/benchmarks/PgClient.Benchmarks/BenchmarkDotNet.Artifacts
+
+volumes:
+  pgclient-data:

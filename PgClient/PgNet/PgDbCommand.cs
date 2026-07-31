@@ -23,12 +23,12 @@ public sealed class PgDbCommand : DbCommand
         _connection = connection;
     }
 
+    [System.Diagnostics.CodeAnalysis.AllowNull]
     public override string CommandText { get; set; } = string.Empty;
     public override int CommandTimeout { get; set; } = 30;
     public override CommandType CommandType { get; set; } = CommandType.Text;
     public override bool DesignTimeVisible { get; set; }
     public override UpdateRowSource UpdatedRowSource { get; set; } = UpdateRowSource.None;
-
     protected override DbConnection? DbConnection
     {
         get => _connection;
